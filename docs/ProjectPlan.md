@@ -554,6 +554,12 @@ Data:
 - No private keys needed — the custom lock script controls where funds go, the bot just triggers the transactions
 - Fallback: any user can trigger release/refund from the UI for any campaign (not just their own)
 
+#### Keeper Tip (Future)
+- Today the release/refund fee comes out of the pledge cell's storage overhead (pledge-lock allows up to `MAX_FEE` = 1 CKB), so whoever triggers the tx needs no CKB of its own, but also earns nothing. The only runner is our bot, next to the indexer on Render.
+- Idea: let the pledge lock pay a small tip to whoever submits release/refund, out of the backer's overhead. Independent operators then have a reason to run the keeper job, and the app keeps working if our bot goes away.
+- Fits psawyerberlin's "Service Runner" proposal on Nervos Talk ([topic 10734](https://talk.nervos.org/t/a-revenue-layer-for-ckb-nodes/10734)), where full nodes would run keeper jobs like this for a fee. CrowdCell offered to be an early use case (2026-09-29).
+- Open questions: how big the tip should be relative to the minimum pledge (100 CKB); whether to pay it to a lock in the witness or to an extra output; how to stop a keeper from taking the full `MAX_FEE`. This is a contract change, so it needs a redeploy and review.
+
 #### UI/UX Changes
 - "Release to Creator" / "Claim Refund" buttons become "Trigger Release" / "Trigger Refund" — callable by anyone
 - Pre-wallet confirmation step showing exact CKB amount before wallet popup
