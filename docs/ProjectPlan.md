@@ -560,6 +560,17 @@ Data:
 - Fits psawyerberlin's "Service Runner" proposal on Nervos Talk ([topic 10734](https://talk.nervos.org/t/a-revenue-layer-for-ckb-nodes/10734)), where full nodes would run keeper jobs like this for a fee. CrowdCell offered to be an early use case (2026-09-29).
 - Open questions: how big the tip should be relative to the minimum pledge (100 CKB); whether to pay it to a lock in the witness or to an extra output; how to stop a keeper from taking the full `MAX_FEE`. This is a contract change, so it needs a redeploy and review.
 
+#### Creator Reputation via Vellum / did:ckb (Future)
+- Suggested by Neon (Telegram, 2026-09-30): each creator (and backer) has a DID profile with a reputation score, which gives a crowdfund more credibility. Today a backer sees only a lock hash and has nothing to judge the creator by.
+- Vellum ([topic 10613](https://talk.nervos.org/t/10613), by truthixify, passed as a resubmitted DIS) is the reference dashboard and SDK for did:ckb, extended into reputation: on-chain claim cells, a scoring engine, and a public builder reputation dashboard. Its deliverables already list an issuance UI for ecosystem partners building "POAP, crowdfunding, and gated sub-communities". It builds on `@ckb-ccc/did-ckb`, part of the CCC SDK we already use.
+- Two directions: **read** (show a creator's DID and Vellum reputation on the campaign page and card) and **write** (CrowdCell issues claims to Vellum when a campaign is funded and pays out, or when a backer pledges, so reputation reflects real outcomes).
+- Off-chain only to start: display and claim issuance need no contract change. Gating campaign creation on reputation would be a later, separate decision.
+- **What Vellum has live (M1 report, 2026-09-25, [post 9](https://talk.nervos.org/t/10613/9), shared by Neon):** Claim Cell contracts on testnet (Claim Type plus a DID Lock), the `@usevellum/sdk` npm package (0.1.0) with `readClaims` and `writeClaim`, verified-social claims for GitHub, Discord, Telegram and Bluesky, 7 published v1 schemas, and a scoring dashboard (usevellum.xyz, repo truthixify/vellum).
+  - `readClaims` scans for an exact **subject lock**, filterable by issuer and schema. So we can read a creator's claims straight from their campaign's creator lock, with no DID linking step.
+  - Claim Type also accepts a plain CKB lock as the subject, not only a DID Lock. So CrowdCell could issue claims to creators and backers using the locks it already knows.
+  - `writeClaim` builds an unsigned, balanced tx that the issuer's current did:ckb controller must authorize. So issuing claims would need a CrowdCell issuer DID, signed by our bot or an admin key.
+- Open questions: which of the 7 schemas fits "campaign funded and paid out" (or whether we need a new one); how to present a missing reputation without penalising new creators; who pays claim cell capacity. Next step: read the Vellum SDK. Neon recommended @menxui on Telegram (display name "truth", likely truthixify), and a first DM went out 2026-09-30.
+
 #### UI/UX Changes
 - "Release to Creator" / "Claim Refund" buttons become "Trigger Release" / "Trigger Refund" — callable by anyone
 - Pre-wallet confirmation step showing exact CKB amount before wallet popup
@@ -1797,3 +1808,12 @@ Triggered by a question on whether wallet balances add up across a pledge. `test
 - Updated Render indexer env vars (7 vars: 5 code hashes + CKB_NETWORK + CKB_RPC_URL)
 - Vercel production redeployed, Render rebuild triggered
 - Deployer account: `ckt1qzda0...2kh5k2` (funded via Pudge Faucet)
+
+**2026-09-30:** Demo campaigns seeded on testnet (pick-up item 1)
+
+- New `off-chain/transaction-builder/seed-testnet-demo.ts` (`--dry-run` prints balances and costs). The deployer funds 6 fresh demo wallets (2 creators, 4 backers; keys in the gitignored `deployment/testnet-demo-wallets.json`), then creates 4 campaigns and 7 pledges. Every description starts with "Demo campaign.".
+- Live now: CKB Light Client for iOS (650/1,500, 30 days), Spanish translation of the CKB docs (500/800, 21 days), Community faucet for CKB testnet (550/500, Funded), and CKB builders meetup in Lisbon (150/2,000, Unsuccessful). The two short ones were finalized by the Render bot about a minute after their deadline, then released and refunded unattended. That's another live check of the automatic flow.
+- Cost about 7.9k test CKB. The deployer is down to about 490 CKB, and roughly 2.2k flows back to demo wallets from the settled campaigns. Top up from the Pudge faucet before any redeploy.
+- Also on the list: "CKB Node Runner: a dashboard and service runner for full nodes" (65,000/75,000, 2 backers), created by someone outside the project.
+- "Backers 0" cause confirmed: backers are counted from live pledges plus live receipts, and `replaceLiveCells` rebuilds those tables every poll, so the count drops to 0 once payouts happen and receipts are reclaimed. Fix: an append-only campaign_backers table that the rebuild never clears. It isn't hit by the demo campaigns while their receipts stay unreclaimed.
+- Context: Neon asked GP (Acceptance team lead) to test CrowdCell today, which is why the list needed to look like a product rather than a test log.
