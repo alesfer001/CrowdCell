@@ -212,4 +212,4 @@ export const DEVNET_ACCOUNTS = IS_DEVNET
 /**
  * Public source repository
  */
-export const REPO_URL = "https://github.com/alesfer001/decentralized-kickstarter";
+export const REPO_URL = "https://github.com/alesfer001/CrowdCell";
