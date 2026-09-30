@@ -139,6 +139,10 @@ export class CampaignIndexer {
   private campaignCodeHash: string = "";
   private pledgeCodeHash: string = "";
   private receiptCodeHash: string = "";
+  /** Every backer a campaign has ever had, keyed by the pledge linkage hash (lowercase) */
+  private backerHistory = new Map<string, Set<string>>();
+  /** Receipt outputs already folded into backerHistory ("txHash_index") */
+  private seenReceiptOutputs = new Set<string>();
   private pledgeLockCodeHash: string = "";
   private initialSyncComplete = false;
 
@@ -445,6 +449,12 @@ export class CampaignIndexer {
       }
     }
 
+    // Receipts are consumed when backers reclaim their deposit, so live cells alone lose
+    // backers after payout. Scan every receipt ever created to keep the count.
+    if (receiptCodeHash) {
+      await this.scanReceiptHistory(receiptCodeHash, pledgeCodeHash);
+    }
+
     // Atomically replace all data in DB
     try {
       this.db.replaceLiveCells(dbCampaigns, dbPledges, dbReceipts);
@@ -705,6 +715,43 @@ export class CampaignIndexer {
   }
 
   /**
+   * Record the backer of every receipt ever created, spent or not. Each pledge tx creates
+   * one receipt next to the pledge cell, so the pledge in the same tx gives the campaign.
+   * Processed outputs are cached, so a poll only fetches transactions it hasn't seen; a
+   * cold start rebuilds the history from chain.
+   */
+  private async scanReceiptHistory(receiptCodeHash: string, pledgeCodeHash: string): Promise<void> {
+    const searchKey = {
+      script: { codeHash: receiptCodeHash, hashType: "data2" as const, args: "0x" },
+      scriptType: "type" as const,
+      scriptSearchMode: "prefix" as const,
+    };
+    try {
+      for await (const entry of this.client.findTransactions(searchKey, "asc", 1000)) {
+        if (entry.isInput) continue;
+        const key = `${entry.txHash}_${entry.cellIndex}`;
+        if (this.seenReceiptOutputs.has(key)) continue;
+
+        const tx = (await this.client.getTransaction(entry.txHash))?.transaction;
+        // Not marked as seen, so a failed lookup is retried on the next poll
+        if (!tx) continue;
+
+        const receipt = parseReceiptData(tx.outputsData[Number(entry.cellIndex)]);
+        const pledgeIndex = tx.outputs.findIndex((o) => o.type?.codeHash === pledgeCodeHash);
+        if (pledgeIndex >= 0) {
+          const linkage = parsePledgeData(tx.outputsData[pledgeIndex]).campaignId.toLowerCase();
+          if (!this.backerHistory.has(linkage)) this.backerHistory.set(linkage, new Set());
+          this.backerHistory.get(linkage)!.add(receipt.backerLockHash.toLowerCase());
+        }
+        this.seenReceiptOutputs.add(key);
+      }
+    } catch (error) {
+      // Keep whatever history was gathered; live cells still count in the meantime
+      console.error("Error scanning receipt history:", error);
+    }
+  }
+
+  /**
    * Get count of unique backers across pledges and receipts for a campaign.
    * Uses the same linkage pattern as getPledgesForCampaign/getReceiptsForCampaign
    * because pledge campaign_id is a type script hash, not the campaign outpoint ID.
@@ -728,6 +775,7 @@ export class CampaignIndexer {
           backers.add(r.backer_lock_hash.toLowerCase());
         }
       }
+      this.backerHistory.get(linkageHash)?.forEach((b) => backers.add(b));
     } else {
       // Fallback: strip _N suffix and match directly
       const txHashOnly = campaignId.includes("_") ? campaignId.split("_")[0] : campaignId;
@@ -743,6 +791,7 @@ export class CampaignIndexer {
           backers.add(r.backer_lock_hash.toLowerCase());
         }
       }
+      this.backerHistory.get(normalized)?.forEach((b) => backers.add(b));
     }
 
     return backers.size;
