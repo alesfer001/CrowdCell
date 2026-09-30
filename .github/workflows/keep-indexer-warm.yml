@@ -1,0 +1,19 @@
+# Pings the Render indexer so the free tier doesn't spin down after 15 idle minutes.
+# The finalization bot runs inside the same service, so this also keeps it running.
+# GitHub may start scheduled runs late or skip some, so an occasional cold start can still happen.
+name: Keep indexer warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping indexer status
+        run: |
+          curl --silent --show-error --fail --max-time 120 --retry 2 --retry-delay 10 \
+            https://ckb-kickstarter-indexer.onrender.com/status
