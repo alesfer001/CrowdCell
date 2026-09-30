@@ -1715,6 +1715,34 @@ The `[DIS]` (topic 10609) finished at 16 of the 30 likes needed in its week and 
 3. Rewrite `docs/grant/PROPOSAL.md` for the $5k testnet scope and post the new `[DIS]`.
 4. Later proposal: fee enforcement, config cell, multisig treasury, Scalebit audit, mainnet launch.
 
+**2026-09-30 — Where to pick up**
+
+State at end of session:
+- Renamed everywhere public: GitHub `alesfer001/CrowdCell` (old URL redirects), frontend `crowdcell.vercel.app` (old kappa alias still works), README and `REPO_URL` updated (PR #7). Still carrying the old name: the Vercel project name, the Render service URL `ckb-kickstarter-indexer.onrender.com`, `CLAUDE.md`'s title and the local folder. None of them show on the site.
+- Live app ready for testing: 4 labelled demo campaigns (2 active, 1 Funded, 1 Unsuccessful, both settled by the bot), plus an outside "CKB Node Runner" campaign. The backer count comes from receipt history, so it holds after payout and reclaim (PR #7, deployed on Render and Vercel, verified live). The indexer is kept warm by `.github/workflows/keep-indexer-warm.yml` (PR #8), which pings `/status` every 10 min.
+- Outreach today: X account @crowdcellckb launched (pinned 23s promo video, 13 follows) and shared in CKBuilders General and the Nervos Network group. Project-thread update posted (topic 10130 post 14), deliberately without a firm Monday date. Week 30 report published (the 5th September report).
+- Neon: suggested the Vellum DID/reputation integration (future-work entries in this plan and PROPOSAL.md section 10), introduced @menxui ("truth", likely truthixify), and **asked GP, lead of the Acceptance team, to test CrowdCell.** Intro DM sent to @menxui, and a public comment posted on the Vellum thread (topic 10613 post 11, asking which schema fits "campaign funded and paid out").
+
+Next session, in order:
+1. Check replies: truth/@menxui, truthixify on 10613, Neon, GP's testing feedback (fix anything GP hits first), reactions to the group posts, X notifications. `/ckb-telegram-round` covers these.
+2. Go/no-go on **Fri 2026-10-02**. Still 0 new supporters beyond the 7 returning likers. If it's a go, post a short "it's up Monday" follow-up on topic 10130.
+3. Proposal rewrite (checklist item 4): $5k testnet scope, line-item budget, milestones, bilingual title, a short "security without an audit" section (Chris asked), the Vellum integration and keeper tip as future work. Then post the `[DIS]` on Mon 2026-10-05.
+
+Loose ends:
+- Deployer wallet is down to ~490 test CKB. Top up from the Pudge faucet before any redeploy.
+- Still open from 09-17: rotate the testnet `BOT_PRIVATE_KEY` on Render, Officeyutong's review of PR #2.
+- Running the indexer locally with `off-chain/indexer/.env` starts a testnet finalization bot (it holds `BOT_PRIVATE_KEY`). Unset it for read-only local runs.
+- October progress reports: Oct 7, 14, 21, 28 for the full $300.
+
+**2026-09-30:** Demo campaigns seeded on testnet (pick-up item 1)
+
+- New `off-chain/transaction-builder/seed-testnet-demo.ts` (`--dry-run` prints balances and costs). The deployer funds 6 fresh demo wallets (2 creators, 4 backers; keys in the gitignored `deployment/testnet-demo-wallets.json`), then creates 4 campaigns and 7 pledges. Every description starts with "Demo campaign.".
+- Live now: CKB Light Client for iOS (650/1,500, 30 days), Spanish translation of the CKB docs (500/800, 21 days), Community faucet for CKB testnet (550/500, Funded), and CKB builders meetup in Lisbon (150/2,000, Unsuccessful). The two short ones were finalized by the Render bot about a minute after their deadline, then released and refunded unattended. That's another live check of the automatic flow.
+- Cost about 7.9k test CKB. The deployer is down to about 490 CKB, and roughly 2.2k flows back to demo wallets from the settled campaigns. Top up from the Pudge faucet before any redeploy.
+- Also on the list: "CKB Node Runner: a dashboard and service runner for full nodes" (65,000/75,000, 2 backers), created by someone outside the project.
+- "Backers 0" cause confirmed: backers are counted from live pledges plus live receipts, and `replaceLiveCells` rebuilds those tables every poll, so the count drops to 0 once payouts happen and receipts are reclaimed. Fix: an append-only campaign_backers table that the rebuild never clears. It isn't hit by the demo campaigns while their receipts stay unreclaimed.
+- Context: Neon asked GP (Acceptance team lead) to test CrowdCell today, which is why the list needed to look like a product rather than a test log.
+
 **2026-09-23 — Where to pick up**
 
 State at end of session:
@@ -1808,12 +1836,3 @@ Triggered by a question on whether wallet balances add up across a pledge. `test
 - Updated Render indexer env vars (7 vars: 5 code hashes + CKB_NETWORK + CKB_RPC_URL)
 - Vercel production redeployed, Render rebuild triggered
 - Deployer account: `ckt1qzda0...2kh5k2` (funded via Pudge Faucet)
-
-**2026-09-30:** Demo campaigns seeded on testnet (pick-up item 1)
-
-- New `off-chain/transaction-builder/seed-testnet-demo.ts` (`--dry-run` prints balances and costs). The deployer funds 6 fresh demo wallets (2 creators, 4 backers; keys in the gitignored `deployment/testnet-demo-wallets.json`), then creates 4 campaigns and 7 pledges. Every description starts with "Demo campaign.".
-- Live now: CKB Light Client for iOS (650/1,500, 30 days), Spanish translation of the CKB docs (500/800, 21 days), Community faucet for CKB testnet (550/500, Funded), and CKB builders meetup in Lisbon (150/2,000, Unsuccessful). The two short ones were finalized by the Render bot about a minute after their deadline, then released and refunded unattended. That's another live check of the automatic flow.
-- Cost about 7.9k test CKB. The deployer is down to about 490 CKB, and roughly 2.2k flows back to demo wallets from the settled campaigns. Top up from the Pudge faucet before any redeploy.
-- Also on the list: "CKB Node Runner: a dashboard and service runner for full nodes" (65,000/75,000, 2 backers), created by someone outside the project.
-- "Backers 0" cause confirmed: backers are counted from live pledges plus live receipts, and `replaceLiveCells` rebuilds those tables every poll, so the count drops to 0 once payouts happen and receipts are reclaimed. Fix: an append-only campaign_backers table that the rebuild never clears. It isn't hit by the demo campaigns while their receipts stay unreclaimed.
-- Context: Neon asked GP (Acceptance team lead) to test CrowdCell today, which is why the list needed to look like a product rather than a test log.
