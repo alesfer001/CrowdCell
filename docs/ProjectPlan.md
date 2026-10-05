@@ -1724,6 +1724,16 @@ The `[DIS]` (topic 10609) finished at 16 of the 30 likes needed in its week and 
 3. Rewrite `docs/grant/PROPOSAL.md` for the $5k testnet scope and post the new `[DIS]`.
 4. Later proposal: fee enforcement, config cell, multisig treasury, Scalebit audit, mainnet launch.
 
+**2026-10-05:** Proposal rewritten for the $5k testnet scope (DIS checklist item 4)
+
+- `docs/grant/PROPOSAL.md` is now the $5k version: title "CrowdCell: From Testnet Demo to a Crowdfunding Product on CKB" with a Chinese half, about 3 months, no audit, no fees, no mainnet.
+- **Scope decision:** creator identity (`.cell` names, Vellum reputation and the `crowdcell.campaign-funded.v1` claim) and the keeper tip move from future work into this proposal, next to the dashboards. Reason: they came from people in the community (LusoCryptoLabs, truthixify, psawyerberlin), and more people with a stake in the proposal is what the likes count needs.
+- **Shipped work is Milestone 0**, paid on approval: Phase 8, the fund-routing fixes, the rebrand and the landing page.
+- Milestones: M0 delivered $1,500, M1 dashboards $1,200 (week 4), M2 creator identity $900 (week 7), M3 creator tooling and at least 3 outside campaigns $600 (week 9), M4 keeper tip $800 (week 12). Section 9 has the line items.
+- New section 6.5, "Security without an audit" (Chris's question).
+- Also today: README written for the GitHub page (`c5b74ea`). The repo still has no `LICENSE` file.
+- Before posting: have a native speaker check the Chinese title, and confirm the "M0 paid on approval" and "M3 paid only once three outside campaigns exist" terms.
+
 **2026-09-30 — Where to pick up**
 
 State at end of session:
