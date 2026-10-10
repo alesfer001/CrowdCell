@@ -1,0 +1,30 @@
+{
+  "network": "testnet",
+  "deployedAt": "2026-09-17T13:16:45.142Z",
+  "campaign": {
+    "codeHash": "0x1d9b9e5959c932c0ff6486e03cd69d0e51a6b087dacf80b909c23d713bd2659c",
+    "txHash": "0x609fbcf58825e83af21e2a5cc28d3f217d5019be75290e6f60455cf3de9ca1ba",
+    "index": 0
+  },
+  "campaignLock": {
+    "codeHash": "0xb6e2b333d0f38a89c70cde6558670b771244695d33daa1fa62385017476401bf",
+    "hashType": "data",
+    "txHash": "0xc4e8aaaefd921550daa21222cebeccaad7fd5d178d4df567d94c9248a5c149b6",
+    "index": 0
+  },
+  "pledge": {
+    "codeHash": "0xe45d09f08d0e842340afb004cfb6b6b6414ad387f9cd2f3e0b9abcd6ae8eb024",
+    "txHash": "0xcf0d6069aa261109704bcabe70d65c3cddddd8c0605fadd12fa0378f2fdb33cf",
+    "index": 0
+  },
+  "pledgeLock": {
+    "codeHash": "0xc28d8042a1cf39d02db0cbc769a26faad80b39563c2d2de40536ddb66ae3a525",
+    "txHash": "0x1dc0f07d3acd90823932aca7034209cbf5d1bd8ba5c9310ea9bb55b7c0a0beb2",
+    "index": 0
+  },
+  "receipt": {
+    "codeHash": "0x2bac36d4cadd65b66c25557d37c2bba4f7e3c40a94ca92f3853b311887dba575",
+    "txHash": "0x63d545b60d5eb9680230f8822f597d70f76cfab5e738d9118a977836e317b967",
+    "index": 0
+  }
+}

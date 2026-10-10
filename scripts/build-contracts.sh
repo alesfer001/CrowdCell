@@ -10,6 +10,9 @@ echo "Building CKB contracts..."
 
 # Set the compiler for RISC-V target
 export CC_riscv64imac_unknown_none_elf=riscv64-elf-gcc
+# Archive ckb-std's C objects with the RISC-V ar. The host ar (e.g. macOS ranlib) can write an
+# archive rustc won't bundle, which drops libc.o from the link and changes the code hash.
+export AR_riscv64imac_unknown_none_elf=riscv64-elf-ar
 # Enable B-extension sub-features for CKB VM v2 (data2 hashType)
 export RUSTFLAGS="-C target-feature=+zba,+zbb,+zbc,+zbs,-a"
 

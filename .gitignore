@@ -1,6 +1,8 @@
 # Rust
 target/
 Cargo.lock
+# Contract lock files are tracked: the deployed code hashes only reproduce with these versions
+!contracts/*/Cargo.lock
 *.rs.bk
 
 # Node
@@ -23,7 +25,9 @@ docs/
 .claude/
 
 # Deployment artifacts (environment-specific)
-deployment/
+deployment/*
+!deployment/deployed-contracts-devnet.json
+!deployment/deployed-contracts-testnet.json
 
 
 # Indexer SQLite data
