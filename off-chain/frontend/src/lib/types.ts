@@ -69,6 +69,8 @@ export interface Pledge {
   pledgeId: string;
   campaignId: string;
   backer: string;
+  /** Full lock script of the backer, when the indexer has it; lets the page look up a `.cell` name */
+  backerLockScript?: CreatorLockScript | null;
   amount: string;
   txHash: string;
   index: number;

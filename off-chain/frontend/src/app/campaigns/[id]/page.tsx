@@ -37,6 +37,7 @@ import { useDevnet } from "@/components/DevnetContext";
 import { useToast } from "@/components/Toast";
 import { SkeletonDetailPage } from "@/components/Skeleton";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
+import { LockName, useCellNames } from "@/components/CellName";
 
 type PledgeSortMode = "recent" | "amount";
 
@@ -120,6 +121,7 @@ export default function CampaignDetailPage() {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [pledges, setPledges] = useState<Pledge[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const names = useCellNames([campaign?.creatorLockScript, ...pledges.map((p) => p.backerLockScript)]);
   const [currentBlock, setCurrentBlock] = useState<bigint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1258,6 +1260,9 @@ export default function CampaignDetailPage() {
 
               <div className="pt-4 border-t border-line">
                 <p className="text-sm text-ink-3 mb-1">Creator</p>
+                {names.get(campaign.creator.toLowerCase()) && (
+                  <p className="font-medium">{names.get(campaign.creator.toLowerCase())}</p>
+                )}
                 <p className="font-mono text-sm break-all">{campaign.creator}</p>
               </div>
 
@@ -1451,7 +1456,7 @@ export default function CampaignDetailPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="font-mono text-sm truncate">
-                            {formatHash(pledge.backer)}
+                            <LockName lockHash={pledge.backer} names={names} />
                           </p>
                           <span className={`px-2 py-0.5 text-xs font-medium rounded ${getPledgeDistributionColor("locked")}`}>
                             {getPledgeDistributionLabel("locked")}
