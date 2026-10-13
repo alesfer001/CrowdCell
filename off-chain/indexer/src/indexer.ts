@@ -568,6 +568,13 @@ export class CampaignIndexer {
       backerLockHash: row.backer_lock_hash,
       amount: BigInt(row.amount),
       createdAt: BigInt(row.created_at),
+      backerLockScript: row.backer_lock_code_hash
+        ? {
+            codeHash: row.backer_lock_code_hash,
+            hashType: row.backer_lock_hash_type!,
+            args: row.backer_lock_args!,
+          }
+        : undefined,
     };
   }
 

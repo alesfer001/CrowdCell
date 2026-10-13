@@ -52,6 +52,7 @@ export interface Pledge extends PledgeData {
   txHash: string;
   index: number;
   createdAt: bigint; // block number
+  backerLockScript?: CreatorLockScript; // Full lock script of the backer (refunds use it; clients can look up a name for it)
 }
 
 /**

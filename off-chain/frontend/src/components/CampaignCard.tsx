@@ -11,11 +11,16 @@ import {
   blocksToTimeEstimate,
 } from "@/lib/utils";
 import { CellMeter, CellMeterTone } from "./CellMeter";
+import { LockName } from "./CellName";
 
 interface CampaignCardProps {
   campaign: Campaign;
   currentBlock: bigint | null;
+  /** `.cell` names by lock hash (useCellNames), looked up once for the whole list */
+  names?: Map<string, string | null>;
 }
+
+const NO_NAMES = new Map<string, string | null>();
 
 /** The campaign's stable URL id: its creation out point, which never moves. */
 function canonicalCampaignId(campaign: Campaign): string {
@@ -29,7 +34,7 @@ function meterTone(effectiveStatus: string): CellMeterTone {
   return "fund";
 }
 
-export function CampaignCard({ campaign, currentBlock }: CampaignCardProps) {
+export function CampaignCard({ campaign, currentBlock, names = NO_NAMES }: CampaignCardProps) {
   const progress = getFundingProgress(campaign.totalPledged, campaign.fundingGoal);
 
   // Compute effective status
@@ -90,7 +95,7 @@ export function CampaignCard({ campaign, currentBlock }: CampaignCardProps) {
       </dl>
 
       <p className="mt-auto font-mono text-[11px] text-ink-3 border-t border-line-2 pt-2.5">
-        creator {formatHash(campaign.creator)}
+        creator <LockName lockHash={campaign.creator} names={names} />
       </p>
     </Link>
   );

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Campaign, IndexerPhase } from "@/lib/types";
 import { fetchCampaigns, fetchBlockNumber } from "@/lib/api";
 import { CampaignCard } from "@/components/CampaignCard";
+import { useCellNames } from "@/components/CellName";
 import { SkeletonCard } from "@/components/Skeleton";
 import { useIndexerReady, IndexerStatusBadge, IndexerWaitNotice } from "@/components/IndexerStatus";
 import Link from "next/link";
@@ -60,6 +61,7 @@ export default function CampaignsApp() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<string>("All");
+  const creatorNames = useCellNames(campaigns.map((c) => c.creatorLockScript));
   const { phase: indexerPhase, elapsedSeconds, retry: retryIndexer } = useIndexerReady();
   const indexerReady = indexerPhase === IndexerPhase.Ready;
 
@@ -178,7 +180,7 @@ export default function CampaignsApp() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                   {visibleCampaigns.map((campaign) => (
-                    <CampaignCard key={campaign.campaignId} campaign={campaign} currentBlock={currentBlock} />
+                    <CampaignCard key={campaign.campaignId} campaign={campaign} currentBlock={currentBlock} names={creatorNames} />
                   ))}
                 </div>
               )}
