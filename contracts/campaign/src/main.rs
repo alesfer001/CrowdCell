@@ -19,9 +19,11 @@ use ckb_std::{
     debug,
     high_level::{
         load_script, load_script_hash, load_cell_data, load_cell_capacity, load_cell_lock,
+        load_cell_type,
         load_cell_occupied_capacity, load_cell_lock_hash, load_input_since,
     },
     ckb_constants::Source,
+    ckb_types::{packed::Script, prelude::*},
     error::SysError,
     type_id::check_type_id,
     since::{Since, LockValue},
@@ -49,6 +51,7 @@ const ERROR_PLEDGE_BELOW_MINIMUM: i8 = 23;
 const ERROR_CREATOR_NOT_PAID: i8 = 24;
 const ERROR_DESTRUCTION_WITH_PLEDGES: i8 = 25;
 const ERROR_PLEDGE_DEADLINE_MISMATCH: i8 = 26;
+const ERROR_DESTRUCTION_MULTIPLE_CAMPAIGNS: i8 = 27;
 
 /// Smallest pledge a campaign accepts: 100 CKB.
 /// A released pledge pays the creator exactly its amount in its own cell, and a cell needs
@@ -526,10 +529,35 @@ fn validate_destruction_after_grace(campaign: &CampaignData) -> Result<(), i8> {
 /// destroy a finalized campaign and keep its capacity. No pledge-lock cell may be spent in
 /// the same transaction: a pledge release also pays the creator, and one creator output
 /// would then satisfy both scripts, letting the builder keep the difference.
+///
+/// For the same reason no other campaign cell may be destroyed alongside: each campaign
+/// checks its own capacity against the creator's outputs, so two campaigns of one creator
+/// would both be satisfied by a single output (second review, finding 2).
 fn validate_destruction_pays_creator(
     campaign: &CampaignData,
     pledge_lock_code_hash: &[u8; 32],
+    own_script: &Script,
 ) -> Result<(), i8> {
+    let mut campaign_inputs = 0;
+    for i in 0.. {
+        match load_cell_type(i, Source::Input) {
+            Ok(Some(type_script)) => {
+                if type_script.code_hash().as_slice() == own_script.code_hash().as_slice()
+                    && type_script.hash_type().as_slice() == own_script.hash_type().as_slice()
+                {
+                    campaign_inputs += 1;
+                }
+            }
+            Ok(None) => {}
+            Err(SysError::IndexOutOfBound) => break,
+            Err(_) => return Err(ERROR_LOAD_CELL),
+        }
+    }
+    if campaign_inputs > 1 {
+        debug!("Campaign destruction blocked — {} campaign cells in one transaction", campaign_inputs);
+        return Err(ERROR_DESTRUCTION_MULTIPLE_CAMPAIGNS);
+    }
+
     for i in 0.. {
         match load_cell_lock(i, Source::Input) {
             Ok(lock) => {
@@ -702,7 +730,7 @@ pub fn program_entry() -> i8 {
                 CampaignStatus::Success | CampaignStatus::Failed => {
                     // Both must hold. The payout check runs first only so each rejection
                     // can be observed on a devnet, where the grace period is unreachable.
-                    match validate_destruction_pays_creator(&campaign, &pledge_lock_code_hash)
+                    match validate_destruction_pays_creator(&campaign, &pledge_lock_code_hash, &script)
                         .and_then(|_| validate_destruction_after_grace(&campaign))
                     {
                         Ok(()) => 0,
