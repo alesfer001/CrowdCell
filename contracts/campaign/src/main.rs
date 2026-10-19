@@ -48,6 +48,7 @@ const ERROR_PLEDGE_UNDERFUNDED: i8 = 22;
 const ERROR_PLEDGE_BELOW_MINIMUM: i8 = 23;
 const ERROR_CREATOR_NOT_PAID: i8 = 24;
 const ERROR_DESTRUCTION_WITH_PLEDGES: i8 = 25;
+const ERROR_PLEDGE_DEADLINE_MISMATCH: i8 = 26;
 
 /// Smallest pledge a campaign accepts: 100 CKB.
 /// A released pledge pays the creator exactly its amount in its own cell, and a cell needs
@@ -195,16 +196,34 @@ fn count_group_cells(source: Source) -> Result<usize, i8> {
     Ok(count)
 }
 
+/// A pledge's lock carries its own copy of the deadline (lock args bytes 32-40), and that
+/// copy is the one pledge-lock enforces on release and refund. It must be the campaign's.
+/// Otherwise a pledge with deadline 0 counts toward the goal, then the pledge-lock grace
+/// fallback refunds it at once with no campaign cell_dep, and the total never comes down.
+fn check_pledge_deadline(lock_args: &[u8], campaign_deadline: u64) -> Result<(), i8> {
+    if lock_args.len() < 40 {
+        return Err(ERROR_PLEDGE_DEADLINE_MISMATCH);
+    }
+    let pledge_deadline = u64::from_le_bytes(lock_args[32..40].try_into().unwrap());
+    if pledge_deadline != campaign_deadline {
+        debug!("Pledge lock deadline {} != campaign deadline {}", pledge_deadline, campaign_deadline);
+        return Err(ERROR_PLEDGE_DEADLINE_MISMATCH);
+    }
+    Ok(())
+}
+
 /// Sum the amounts of every pledge cell in `source` that belongs to this campaign.
 ///
 /// A pledge cell belongs to this campaign when its lock is the pledge-lock contract and
 /// the first 32 bytes of its lock args are this campaign's type script hash. That binding
 /// is the one pledge-lock itself uses to decide where funds route, so it is the binding
 /// worth accumulating against — the `campaign_id` field in pledge *data* is informational.
+/// A pledge that belongs to this campaign but carries another deadline is rejected.
 fn sum_campaign_pledges(
     source: Source,
     pledge_lock_code_hash: &[u8; 32],
     campaign_type_hash: &[u8; 32],
+    campaign_deadline: u64,
     enforce_minimum: bool,
 ) -> Result<u64, i8> {
     let mut total: u64 = 0;
@@ -224,6 +243,7 @@ fn sum_campaign_pledges(
         if lock_args.len() < 32 || &lock_args[0..32] != &campaign_type_hash[..] {
             continue;
         }
+        check_pledge_deadline(&lock_args, campaign_deadline)?;
 
         let data = match load_cell_data(i, source) {
             Ok(d) => d,
@@ -345,8 +365,8 @@ fn validate_pledge_update(
     // transaction nets to zero and is rejected below — merges leave the total untouched
     // and have no reason to consume the campaign cell.
     // The minimum applies to new pledges only; consumed ones were checked when created
-    let created = sum_campaign_pledges(Source::Output, pledge_lock_code_hash, &campaign_type_hash, true)?;
-    let consumed = sum_campaign_pledges(Source::Input, pledge_lock_code_hash, &campaign_type_hash, false)?;
+    let created = sum_campaign_pledges(Source::Output, pledge_lock_code_hash, &campaign_type_hash, old.deadline_block, true)?;
+    let consumed = sum_campaign_pledges(Source::Input, pledge_lock_code_hash, &campaign_type_hash, old.deadline_block, false)?;
 
     if created <= consumed {
         debug!("Pledge update: no net pledge inflow ({} in, {} out)", created, consumed);
@@ -828,5 +848,31 @@ mod tests {
             validate_immutable_fields(&old_bytes, &new_bytes, &old, &new, 99),
             Err(99)
         );
+    }
+
+    fn pledge_lock_args(deadline: u64) -> [u8; 72] {
+        let mut args = [0u8; 72];
+        args[32..40].copy_from_slice(&deadline.to_le_bytes());
+        args
+    }
+
+    #[test]
+    fn test_pledge_deadline_matching_campaign_accepted() {
+        assert_eq!(check_pledge_deadline(&pledge_lock_args(500), 500), Ok(()));
+    }
+
+    #[test]
+    fn test_pledge_deadline_zero_rejected() {
+        assert_eq!(check_pledge_deadline(&pledge_lock_args(0), 500), Err(ERROR_PLEDGE_DEADLINE_MISMATCH));
+    }
+
+    #[test]
+    fn test_pledge_deadline_later_than_campaign_rejected() {
+        assert_eq!(check_pledge_deadline(&pledge_lock_args(501), 500), Err(ERROR_PLEDGE_DEADLINE_MISMATCH));
+    }
+
+    #[test]
+    fn test_pledge_lock_args_without_deadline_rejected() {
+        assert_eq!(check_pledge_deadline(&[0u8; 32], 500), Err(ERROR_PLEDGE_DEADLINE_MISMATCH));
     }
 }
