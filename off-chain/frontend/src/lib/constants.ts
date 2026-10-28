@@ -169,10 +169,11 @@ export const MIN_PLEDGE_CKB = 100;
 export const PLEDGE_CELL_OVERHEAD = BigInt(Math.ceil((8 + PLEDGE_DATA_SIZE + 65 + 65) * 1.2)) * BigInt(100000000);
 
 /**
- * Capacity of a receipt cell, in shannons. Same formula as the transaction builder. The
- * backer reclaims it once the campaign is finalized.
+ * Capacity of a receipt cell, in shannons. Same formula as the transaction builder's
+ * calculateCellCapacity(80, true, 65, 64): the receipt type script carries 64 bytes of args
+ * (pledge and pledge-lock code hashes). The backer reclaims it once the campaign is finalized.
  */
-export const RECEIPT_CELL_CAPACITY = BigInt(Math.ceil((8 + RECEIPT_DATA_SIZE + 65 + 65) * 1.2)) * BigInt(100000000);
+export const RECEIPT_CELL_CAPACITY = BigInt(Math.ceil((8 + RECEIPT_DATA_SIZE + 65 + 97) * 1.2)) * BigInt(100000000);
 
 /**
  * CKB Explorer base URLs per network

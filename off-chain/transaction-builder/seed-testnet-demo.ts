@@ -31,7 +31,7 @@ const DAY_BLOCKS = BigInt((24 * 3600) / SECONDS_PER_BLOCK);
 
 /** Pledge cell and receipt cell overheads, as the frontend computes them */
 const PLEDGE_OVERHEAD = BigInt(Math.ceil((8 + 72 + 65 + 65) * 1.2)) * CKB;
-const RECEIPT_OVERHEAD = BigInt(Math.ceil((8 + 80 + 65 + 65) * 1.2)) * CKB;
+const RECEIPT_OVERHEAD = BigInt(Math.ceil((8 + 80 + 65 + 97) * 1.2)) * CKB;
 /** Headroom per wallet for fees and change cells */
 const WALLET_BUFFER = BigInt(80) * CKB;
 
