@@ -12,7 +12,8 @@ ckb_std::default_alloc!(16384, 1258306, 64);
 use ckb_std::{
     debug,
     high_level::{
-        load_script, load_input_since, load_cell_lock_hash, load_cell_capacity, load_cell_data,
+        load_script, load_input_since, load_cell_lock_hash, load_cell_type_hash, load_cell_capacity,
+        load_cell_data,
     },
     ckb_constants::Source,
     error::SysError,
@@ -56,8 +57,10 @@ impl CampaignLockArgs {
 ///
 /// v1.2 Phase 8: every pledge consumes the campaign cell and re-creates it with a larger
 /// `total_pledged`, which means the campaign cell now has to be spendable *before* the
-/// deadline. That is only allowed when the campaign is carried forward intact: an output
-/// under this same lock, holding at least the same capacity, still in Active status.
+/// deadline. That is only allowed when the campaign is carried forward intact: the output
+/// carrying the campaign's type script, under this same lock, holding at least the same
+/// capacity, still in Active status. Only that output counts: any other cell under this lock
+/// with Active-looking data could be a decoy while the campaign cell leaves under another lock.
 /// Everything the data may or may not change is the type script's business; the lock only
 /// decides whether the deadline gate applies.
 fn is_active_campaign_carried_forward() -> Result<bool, i8> {
@@ -65,31 +68,39 @@ fn is_active_campaign_carried_forward() -> Result<bool, i8> {
         .map_err(|_| ERROR_LOAD_CELL)?;
     let input_capacity = load_cell_capacity(0, Source::GroupInput)
         .map_err(|_| ERROR_LOAD_CELL)?;
+    // A cell under this lock with no type is not a campaign and gets no exemption
+    let campaign_type_hash = match load_cell_type_hash(0, Source::GroupInput) {
+        Ok(Some(h)) => h,
+        Ok(None) => return Ok(false),
+        Err(_) => return Err(ERROR_LOAD_CELL),
+    };
 
     for i in 0.. {
-        let lock_hash = match load_cell_lock_hash(i, Source::Output) {
+        let type_hash = match load_cell_type_hash(i, Source::Output) {
             Ok(h) => h,
             Err(SysError::IndexOutOfBound) => break,
             Err(_) => return Err(ERROR_LOAD_CELL),
         };
-        if lock_hash != own_lock_hash {
+        if type_hash != Some(campaign_type_hash) {
             continue;
         }
 
-        let data = match load_cell_data(i, Source::Output) {
-            Ok(d) => d,
-            Err(_) => return Err(ERROR_LOAD_CELL),
-        };
+        // TypeID makes this the one campaign cell: it either stays under this lock as
+        // Active, or this is not a carry-forward
+        let lock_hash = load_cell_lock_hash(i, Source::Output).map_err(|_| ERROR_LOAD_CELL)?;
+        if lock_hash != own_lock_hash {
+            debug!("Campaign cell output is under another lock");
+            return Ok(false);
+        }
+
+        let data = load_cell_data(i, Source::Output).map_err(|_| ERROR_LOAD_CELL)?;
         if data.len() < CAMPAIGN_DATA_MIN_SIZE
             || data[CAMPAIGN_STATUS_OFFSET] != CAMPAIGN_STATUS_ACTIVE
         {
-            continue;
+            return Ok(false);
         }
 
-        let output_capacity = match load_cell_capacity(i, Source::Output) {
-            Ok(c) => c,
-            Err(_) => return Err(ERROR_LOAD_CELL),
-        };
+        let output_capacity = load_cell_capacity(i, Source::Output).map_err(|_| ERROR_LOAD_CELL)?;
         if output_capacity < input_capacity {
             debug!(
                 "Campaign carried forward with less capacity: {} -> {}",

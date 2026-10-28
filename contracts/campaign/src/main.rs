@@ -52,6 +52,7 @@ const ERROR_CREATOR_NOT_PAID: i8 = 24;
 const ERROR_DESTRUCTION_WITH_PLEDGES: i8 = 25;
 const ERROR_PLEDGE_DEADLINE_MISMATCH: i8 = 26;
 const ERROR_DESTRUCTION_MULTIPLE_CAMPAIGNS: i8 = 27;
+const ERROR_CAMPAIGN_LOCK_CHANGED: i8 = 28;
 
 /// Smallest pledge a campaign accepts: 100 CKB.
 /// A released pledge pays the creator exactly its amount in its own cell, and a cell needs
@@ -302,6 +303,23 @@ fn validate_capacity_preserved() -> Result<(), i8> {
             input_capacity, output_capacity
         );
         return Err(ERROR_CAPACITY_DECREASED);
+    }
+
+    Ok(())
+}
+
+/// The campaign cell stays under its lock across every state transition.
+/// Otherwise a pledger could carry the campaign forward under their own lock and sit on
+/// finalization, or a finalizer could keep the cell so it is never destroyed back to the creator.
+fn validate_lock_preserved() -> Result<(), i8> {
+    let input_lock_hash = load_cell_lock_hash(0, Source::GroupInput)
+        .map_err(|_| ERROR_LOAD_CELL)?;
+    let output_lock_hash = load_cell_lock_hash(0, Source::GroupOutput)
+        .map_err(|_| ERROR_LOAD_CELL)?;
+
+    if input_lock_hash != output_lock_hash {
+        debug!("Campaign cell moved under another lock");
+        return Err(ERROR_CAMPAIGN_LOCK_CHANGED);
     }
 
     Ok(())
@@ -667,7 +685,7 @@ pub fn program_entry() -> i8 {
 
         // State transition: has input AND output.
         // A campaign that stays Active is a pledge accumulator update; anything else is a
-        // finalization. Both must preserve the cell's capacity.
+        // finalization. Both must preserve the cell's capacity and lock.
         (true, true) => {
             let old_data = match load_cell_data(0, Source::GroupInput) {
                 Ok(d) => d,
@@ -687,6 +705,9 @@ pub fn program_entry() -> i8 {
             };
 
             if let Err(code) = validate_capacity_preserved() {
+                return code;
+            }
+            if let Err(code) = validate_lock_preserved() {
                 return code;
             }
 
