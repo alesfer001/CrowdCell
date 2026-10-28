@@ -3,7 +3,9 @@
  *
  * Supports devnet, testnet, and mainnet via environment variables:
  *   CKB_NETWORK        - "devnet" (default), "testnet", or "mainnet"
- *   DEPLOYER_PRIVATE_KEY - Private key for the deployer account
+ *   DEPLOYER_PRIVATE_KEY - Private key for the deployer account. Off devnet it falls back to
+ *                          DEPLOYER_PRIVATE_KEY in this directory's .env (gitignored), where
+ *                          the testnet deployer key is kept between deploys.
  *   CKB_RPC_URL         - Optional RPC URL override
  *
  * Examples:
@@ -11,7 +13,7 @@
  *   npx ts-node scripts/deploy-contracts.ts
  *
  *   # Testnet
- *   CKB_NETWORK=testnet DEPLOYER_PRIVATE_KEY=0x... npx ts-node scripts/deploy-contracts.ts
+ *   CKB_NETWORK=testnet npx ts-node deploy-contracts.ts
  */
 import { ccc } from "@ckb-ccc/core";
 import * as fs from "fs";
@@ -25,7 +27,17 @@ const NETWORK = (process.env.CKB_NETWORK as NetworkType) || "devnet";
 // Default devnet private key (publicly known OffCKB account #0)
 const DEFAULT_DEVNET_KEY = "0x6109170b275a09ad54877b82f7d9930f88cab5717d484fb4741ae9d1dd078cd6";
 
-const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY || (NETWORK === "devnet" ? DEFAULT_DEVNET_KEY : "");
+/** DEPLOYER_PRIVATE_KEY from this directory's .env, if there is one */
+function deployerKeyFromEnvFile(): string {
+  const envPath = path.join(__dirname, ".env");
+  if (!fs.existsSync(envPath)) return "";
+  const line = fs.readFileSync(envPath, "utf-8").split("\n").find((l) => l.startsWith("DEPLOYER_PRIVATE_KEY="));
+  return line ? line.slice("DEPLOYER_PRIVATE_KEY=".length).trim() : "";
+}
+
+// The .env key is for testnet; devnet keeps the publicly known OffCKB account
+const PRIVATE_KEY =
+  process.env.DEPLOYER_PRIVATE_KEY || (NETWORK === "devnet" ? DEFAULT_DEVNET_KEY : deployerKeyFromEnvFile());
 
 const RPC_URL = process.env.CKB_RPC_URL;
 
