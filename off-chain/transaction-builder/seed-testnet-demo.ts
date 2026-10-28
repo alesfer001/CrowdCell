@@ -6,7 +6,8 @@
  *   npx ts-node seed-testnet-demo.ts             # creates wallets, campaigns and pledges
  *
  * Wallets:
- *   - Funder: the testnet deployer (deployment/testnet-deployer.json). It pays for everything.
+ *   - Funder: the testnet deployer (DEPLOYER_PRIVATE_KEY in off-chain/transaction-builder/.env,
+ *     the same key deploy-contracts.ts uses). It pays for everything.
  *   - Demo creators and backers: fresh keys generated on first run and stored in
  *     deployment/testnet-demo-wallets.json (gitignored), so each campaign has distinct backers.
  *
@@ -154,7 +155,9 @@ async function main() {
     contracts.receipt
   );
 
-  const funderKey = JSON.parse(fs.readFileSync(path.join(DEPLOYMENT, "testnet-deployer.json"), "utf-8")).privateKey;
+  const envLine = fs.readFileSync(path.join(__dirname, ".env"), "utf-8").split("\n").find((l) => l.startsWith("DEPLOYER_PRIVATE_KEY="));
+  if (!envLine) throw new Error("DEPLOYER_PRIVATE_KEY missing from off-chain/transaction-builder/.env");
+  const funderKey = envLine.slice("DEPLOYER_PRIVATE_KEY=".length).trim();
   const funder = new ccc.SignerCkbPrivateKey(client, funderKey);
   const keys = loadOrCreateWallets(dryRun);
   const signers = Object.fromEntries(
