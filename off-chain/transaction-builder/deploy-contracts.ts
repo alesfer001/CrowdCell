@@ -39,8 +39,25 @@ const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY || FALLBACK_KEYS[NETWORK]()
 
 const RPC_URL = process.env.CKB_RPC_URL;
 
-async function deployContract(signer: ccc.Signer, binaryPath: string, name: string) {
+/** The last deployment on this network, by contract name, to reuse unchanged binaries from */
+function previousDeployment(): Record<string, { codeHash: string; txHash: string; index: number } | undefined> {
+  const manifest = path.resolve(__dirname, "..", "..", "deployment", `deployed-contracts-${NETWORK}.json`);
+  return fs.existsSync(manifest) ? JSON.parse(fs.readFileSync(manifest, "utf-8")) : {};
+}
+
+async function deployContract(signer: ccc.Signer, binaryPath: string, name: string, key: string) {
   const binary = fs.readFileSync(binaryPath);
+
+  // An unchanged binary already on chain costs nothing to reuse and about 1 CKB per byte to redeploy
+  const previous = previousDeployment()[key];
+  if (previous?.codeHash === ccc.hashCkb(binary)) {
+    const live = await signer.client.getCellLive({ txHash: previous.txHash, index: previous.index }, false);
+    if (live) {
+      console.log(`\nReusing ${name}: unchanged, live at ${previous.txHash}`);
+      return previous;
+    }
+  }
+
   console.log(`\nDeploying ${name} (${binary.length} bytes)...`);
 
   const tx = ccc.Transaction.from({
@@ -125,7 +142,7 @@ async function main() {
   );
 
   // Deploy campaign contract
-  const campaign = await deployContract(signer, campaignBinary, "Campaign");
+  const campaign = await deployContract(signer, campaignBinary, "Campaign", "campaign");
 
   // Wait for confirmation (important on testnet/mainnet)
   if (NETWORK !== "devnet") {
@@ -135,7 +152,7 @@ async function main() {
   }
 
   // Deploy campaign-lock contract (v1.1 trustless fund routing)
-  const campaignLock = await deployContract(signer, campaignLockBinary, "Campaign-Lock");
+  const campaignLock = await deployContract(signer, campaignLockBinary, "Campaign-Lock", "campaignLock");
 
   if (NETWORK !== "devnet") {
     await waitForTx(client, campaignLock.txHash);
@@ -144,7 +161,7 @@ async function main() {
   }
 
   // Deploy pledge contract
-  const pledge = await deployContract(signer, pledgeBinary, "Pledge");
+  const pledge = await deployContract(signer, pledgeBinary, "Pledge", "pledge");
 
   if (NETWORK !== "devnet") {
     await waitForTx(client, pledge.txHash);
@@ -153,7 +170,7 @@ async function main() {
   }
 
   // Deploy pledge-lock contract
-  const pledgeLock = await deployContract(signer, pledgeLockBinary, "Pledge-Lock");
+  const pledgeLock = await deployContract(signer, pledgeLockBinary, "Pledge-Lock", "pledgeLock");
 
   if (NETWORK !== "devnet") {
     await waitForTx(client, pledgeLock.txHash);
@@ -162,7 +179,7 @@ async function main() {
   }
 
   // Deploy receipt contract
-  const receipt = await deployContract(signer, receiptBinary, "Receipt");
+  const receipt = await deployContract(signer, receiptBinary, "Receipt", "receipt");
 
   if (NETWORK !== "devnet") {
     await waitForTx(client, receipt.txHash);

@@ -1,15 +1,15 @@
 {
   "network": "testnet",
-  "deployedAt": "2026-10-28T11:11:44.596Z",
+  "deployedAt": "2026-10-31T15:57:47.139Z",
   "campaign": {
-    "codeHash": "0xda8901bad5ff389025e130e668334d72e858a850c5b1d4fbd407f636a3d708ef",
-    "txHash": "0x0a744e766a627cf9ae7bdf9f6a7e24dfa702d1968abff35c61fae936c35d2936",
+    "codeHash": "0xd50ca43249515bb0ebe8534f4d7f74520e4fb7c1163d488c288672ffd7e7a8f5",
+    "txHash": "0x8ffc8f88be667072ca06e89127444be41029baabae30306d8247c11dd6f1c799",
     "index": 0
   },
   "campaignLock": {
-    "codeHash": "0x91a659bc6bb1b8a25c5bd9199984a2a9c38543f1d384e200e8424507958b8d61",
+    "codeHash": "0xd975780a890b817303a5414167ce235c041a9e63bb5e85f764acc71209fd02a3",
     "hashType": "data",
-    "txHash": "0xfc10906d4d04eb9ffb8618ca9d8d540dc35942e89e3828f92e1d3e60c5e8dd21",
+    "txHash": "0x1ea89700f68f672f950cd43bb764bf7148039d7c8151dad04922437d33d21504",
     "index": 0
   },
   "pledge": {
@@ -23,8 +23,8 @@
     "index": 0
   },
   "receipt": {
-    "codeHash": "0x7b8671cf041bd50cb521640ed19bdbd483ca31f0ff82bec8c1ed55a19ad0e626",
-    "txHash": "0x45bbd345f0cd84948c9038e282d9a81514d0726d576335a6682c436818090913",
+    "codeHash": "0x523716e6c46501480391965a9305d2be33045ce3be19300f62546ff3aa8bf8b5",
+    "txHash": "0xe40519d726f365e0d24baf31f5e4402d021efca4a62449f5d4215a800e60436d",
     "index": 0
   }
 }

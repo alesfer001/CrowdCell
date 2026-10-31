@@ -50,6 +50,10 @@ This will:
 - Save results to `deployment/deployed-contracts-testnet.json`
 - Print the environment variables you need
 
+A contract whose binary matches the manifest and is still live on chain is reused, not deployed again, which saves about 1 CKB per byte. The script can stay running after it prints the summary; once the manifest is saved, it's safe to stop it.
+
+On Render, update the hashes with **Add variable > Import from .env**. The import adds new rows next to the existing ones, so remove the old rows before **Save and deploy**. After the deploy, check that the indexer lists the new campaigns.
+
 Example output:
 ```
 === Deployment Complete ===
