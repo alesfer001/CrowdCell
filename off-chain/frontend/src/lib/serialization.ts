@@ -3,6 +3,18 @@
  * Used by both campaign creation and finalization flows.
  */
 
+/**
+ * Receipt type script args: pledge code hash + pledge-lock code hash (64 bytes).
+ * Throws on anything but two 32-byte hashes, since malformed args only fail on-chain.
+ */
+export function receiptTypeArgs(pledgeCodeHash: string, pledgeLockCodeHash: string): string {
+  const [pledge, lock] = [pledgeCodeHash, pledgeLockCodeHash].map((h) => h.replace(/^0x/, ""));
+  if (!/^[0-9a-fA-F]{64}$/.test(pledge) || !/^[0-9a-fA-F]{64}$/.test(lock)) {
+    throw new Error("Receipt type args: pledge and pledge-lock code hashes must be 32 bytes of hex");
+  }
+  return "0x" + pledge + lock;
+}
+
 /** Convert a u64 (bigint) to little-endian hex string (16 chars) */
 export function u64ToHexLE(value: bigint): string {
   const hex = value.toString(16).padStart(16, "0");

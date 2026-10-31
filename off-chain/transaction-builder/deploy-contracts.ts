@@ -3,9 +3,9 @@
  *
  * Supports devnet, testnet, and mainnet via environment variables:
  *   CKB_NETWORK        - "devnet" (default), "testnet", or "mainnet"
- *   DEPLOYER_PRIVATE_KEY - Private key for the deployer account. Off devnet it falls back to
+ *   DEPLOYER_PRIVATE_KEY - Private key for the deployer account. On testnet it falls back to
  *                          DEPLOYER_PRIVATE_KEY in this directory's .env (gitignored), where
- *                          the testnet deployer key is kept between deploys.
+ *                          the testnet deployer key is kept between deploys. Required on mainnet.
  *   CKB_RPC_URL         - Optional RPC URL override
  *
  * Examples:
@@ -19,6 +19,7 @@ import { ccc } from "@ckb-ccc/core";
 import * as fs from "fs";
 import * as path from "path";
 import { createCkbClient, NetworkType } from "./src/ckbClient";
+import { deployerKeyFromEnvFile } from "./deployerKey";
 
 // --- Configuration from environment ---
 
@@ -27,17 +28,14 @@ const NETWORK = (process.env.CKB_NETWORK as NetworkType) || "devnet";
 // Default devnet private key (publicly known OffCKB account #0)
 const DEFAULT_DEVNET_KEY = "0x6109170b275a09ad54877b82f7d9930f88cab5717d484fb4741ae9d1dd078cd6";
 
-/** DEPLOYER_PRIVATE_KEY from this directory's .env, if there is one */
-function deployerKeyFromEnvFile(): string {
-  const envPath = path.join(__dirname, ".env");
-  if (!fs.existsSync(envPath)) return "";
-  const line = fs.readFileSync(envPath, "utf-8").split("\n").find((l) => l.startsWith("DEPLOYER_PRIVATE_KEY="));
-  return line ? line.slice("DEPLOYER_PRIVATE_KEY=".length).trim() : "";
-}
-
-// The .env key is for testnet; devnet keeps the publicly known OffCKB account
-const PRIVATE_KEY =
-  process.env.DEPLOYER_PRIVATE_KEY || (NETWORK === "devnet" ? DEFAULT_DEVNET_KEY : deployerKeyFromEnvFile());
+// Devnet keeps the publicly known OffCKB account. The .env key is for testnet only, so mainnet
+// always needs DEPLOYER_PRIVATE_KEY set explicitly.
+const FALLBACK_KEYS: Record<NetworkType, () => string> = {
+  devnet: () => DEFAULT_DEVNET_KEY,
+  testnet: deployerKeyFromEnvFile,
+  mainnet: () => "",
+};
+const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY || FALLBACK_KEYS[NETWORK]();
 
 const RPC_URL = process.env.CKB_RPC_URL;
 
@@ -90,7 +88,7 @@ async function main() {
   console.log(`RPC URL:  ${RPC_URL}`);
 
   if (!PRIVATE_KEY) {
-    console.error("ERROR: DEPLOYER_PRIVATE_KEY environment variable is required for non-devnet deployments.");
+    console.error("ERROR: no deployer key. Set DEPLOYER_PRIVATE_KEY (required on mainnet; on testnet it can also come from .env).");
     process.exit(1);
   }
 

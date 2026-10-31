@@ -32,6 +32,7 @@ import {
   readCampaignStatus,
   withTotalPledged,
   withCampaignStatus,
+  receiptTypeArgs,
 } from "@/lib/serialization";
 import { useDevnet } from "@/components/DevnetContext";
 import { useToast } from "@/components/Toast";
@@ -343,7 +344,7 @@ export default function CampaignDetailPage() {
                 codeHash: CONTRACTS.receipt.codeHash,
                 hashType: CONTRACTS.receipt.hashType,
                 // Pledge code hash + pledge-lock code hash, so the receipt can recognise its pledge
-                args: CONTRACTS.pledge.codeHash + CONTRACTS.pledgeLock.codeHash.slice(2),
+                args: receiptTypeArgs(CONTRACTS.pledge.codeHash, CONTRACTS.pledgeLock.codeHash),
               },
             },
           ],

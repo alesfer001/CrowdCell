@@ -21,6 +21,7 @@ import { ccc } from "@ckb-ccc/core";
 import { TransactionBuilder } from "./src";
 import type { ContractInfo } from "./src/types";
 import { createCkbClient } from "./src/ckbClient";
+import { deployerKeyFromEnvFile } from "./deployerKey";
 import { waitForTx, campaignTypeArgs, sleep } from "./test-helpers";
 
 const RPC_URL = "https://testnet.ckbapp.dev/";
@@ -155,9 +156,8 @@ async function main() {
     contracts.receipt
   );
 
-  const envLine = fs.readFileSync(path.join(__dirname, ".env"), "utf-8").split("\n").find((l) => l.startsWith("DEPLOYER_PRIVATE_KEY="));
-  if (!envLine) throw new Error("DEPLOYER_PRIVATE_KEY missing from off-chain/transaction-builder/.env");
-  const funderKey = envLine.slice("DEPLOYER_PRIVATE_KEY=".length).trim();
+  const funderKey = deployerKeyFromEnvFile();
+  if (!funderKey) throw new Error("DEPLOYER_PRIVATE_KEY missing from off-chain/transaction-builder/.env");
   const funder = new ccc.SignerCkbPrivateKey(client, funderKey);
   const keys = loadOrCreateWallets(dryRun);
   const signers = Object.fromEntries(
