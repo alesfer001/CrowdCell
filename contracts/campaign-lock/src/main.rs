@@ -53,7 +53,25 @@ impl CampaignLockArgs {
     }
 }
 
-/// Is this transaction a pledge accumulator update?
+/// Is this transaction a pledge accumulator update, for every cell under this lock?
+///
+/// The args are just the deadline, so any cell with the same deadline lands in this script
+/// group. Each one has to qualify, or a stray cell could leave behind a real pledge update.
+fn all_group_inputs_carried_forward() -> Result<bool, i8> {
+    for i in 0.. {
+        match load_cell_capacity(i, Source::GroupInput) {
+            Ok(_) => {}
+            Err(SysError::IndexOutOfBound) => break,
+            Err(_) => return Err(ERROR_LOAD_CELL),
+        }
+        if !is_active_campaign_carried_forward(i)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Is this group input a campaign cell being carried forward?
 ///
 /// v1.2 Phase 8: every pledge consumes the campaign cell and re-creates it with a larger
 /// `total_pledged`, which means the campaign cell now has to be spendable *before* the
@@ -63,13 +81,13 @@ impl CampaignLockArgs {
 /// with Active-looking data could be a decoy while the campaign cell leaves under another lock.
 /// Everything the data may or may not change is the type script's business; the lock only
 /// decides whether the deadline gate applies.
-fn is_active_campaign_carried_forward() -> Result<bool, i8> {
-    let own_lock_hash = load_cell_lock_hash(0, Source::GroupInput)
+fn is_active_campaign_carried_forward(group_index: usize) -> Result<bool, i8> {
+    let own_lock_hash = load_cell_lock_hash(group_index, Source::GroupInput)
         .map_err(|_| ERROR_LOAD_CELL)?;
-    let input_capacity = load_cell_capacity(0, Source::GroupInput)
+    let input_capacity = load_cell_capacity(group_index, Source::GroupInput)
         .map_err(|_| ERROR_LOAD_CELL)?;
     // A cell under this lock with no type is not a campaign and gets no exemption
-    let campaign_type_hash = match load_cell_type_hash(0, Source::GroupInput) {
+    let campaign_type_hash = match load_cell_type_hash(group_index, Source::GroupInput) {
         Ok(Some(h)) => h,
         Ok(None) => return Ok(false),
         Err(_) => return Err(ERROR_LOAD_CELL),
@@ -134,7 +152,7 @@ pub fn program_entry() -> i8 {
 
     // 2. Pledge accumulator updates happen before the deadline and are exempt from the
     //    deadline gate. The campaign type script validates the state transition itself.
-    match is_active_campaign_carried_forward() {
+    match all_group_inputs_carried_forward() {
         Ok(true) => {
             debug!("Active campaign carried forward — allowing pre-deadline spend");
             return 0;

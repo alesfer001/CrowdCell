@@ -261,8 +261,8 @@ export function serializeReceiptTypeArgs(pledgeCodeHash: string, pledgeLockCodeH
   const lockHash = pledgeLockCodeHash.startsWith("0x")
     ? pledgeLockCodeHash.slice(2)
     : pledgeLockCodeHash;
-  if (pledgeHash.length !== 64 || lockHash.length !== 64) {
-    throw new Error("Receipt type args: both pledge and pledge-lock code hashes must be 32 bytes");
+  if (!/^[0-9a-fA-F]{64}$/.test(pledgeHash) || !/^[0-9a-fA-F]{64}$/.test(lockHash)) {
+    throw new Error("Receipt type args: both pledge and pledge-lock code hashes must be 32 bytes of hex");
   }
   return "0x" + pledgeHash + lockHash;
 }
