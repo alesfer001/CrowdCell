@@ -19,6 +19,7 @@ use ckb_std::{
     debug,
     high_level::{
         load_script, load_script_hash, load_cell_data, load_cell_capacity, load_cell_lock,
+        load_cell_type_hash,
         load_cell_occupied_capacity, load_cell_lock_hash, load_input_since,
     },
     ckb_constants::Source,
@@ -48,6 +49,9 @@ const ERROR_PLEDGE_UNDERFUNDED: i8 = 22;
 const ERROR_PLEDGE_BELOW_MINIMUM: i8 = 23;
 const ERROR_CREATOR_NOT_PAID: i8 = 24;
 const ERROR_DESTRUCTION_WITH_PLEDGES: i8 = 25;
+const ERROR_PLEDGE_DEADLINE_MISMATCH: i8 = 26;
+const ERROR_DESTRUCTION_OTHER_TYPED_INPUT: i8 = 27;
+const ERROR_CAMPAIGN_LOCK_CHANGED: i8 = 28;
 
 /// Smallest pledge a campaign accepts: 100 CKB.
 /// A released pledge pays the creator exactly its amount in its own cell, and a cell needs
@@ -77,6 +81,9 @@ const CAMPAIGN_ARGS_SIZE: usize = 64;
 /// Offset of the pledge amount inside pledge cell data (72 bytes total).
 const PLEDGE_DATA_SIZE: usize = 72;
 const PLEDGE_AMOUNT_OFFSET: usize = 64;
+
+/// Pledge-lock args: campaign hash (32) + deadline (8) + backer lock hash (32).
+const PLEDGE_LOCK_ARGS_SIZE: usize = 72;
 
 /// Campaign status enum
 #[repr(u8)]
@@ -195,16 +202,36 @@ fn count_group_cells(source: Source) -> Result<usize, i8> {
     Ok(count)
 }
 
+/// A pledge's lock carries its own copy of the deadline (lock args bytes 32-40), and that
+/// copy is the one pledge-lock enforces on release and refund. It must be the campaign's.
+/// Otherwise a pledge with deadline 0 counts toward the goal, then the pledge-lock grace
+/// fallback refunds it at once with no campaign cell_dep, and the total never comes down.
+/// Shorter args are rejected too: pledge-lock can never parse them, so the pledge could count
+/// toward the goal and then never be released.
+fn validate_pledge_deadline(lock_args: &[u8], campaign_deadline: u64) -> Result<(), i8> {
+    if lock_args.len() < PLEDGE_LOCK_ARGS_SIZE {
+        return Err(ERROR_PLEDGE_DEADLINE_MISMATCH);
+    }
+    let pledge_deadline = u64::from_le_bytes(lock_args[32..40].try_into().unwrap());
+    if pledge_deadline != campaign_deadline {
+        debug!("Pledge lock deadline {} != campaign deadline {}", pledge_deadline, campaign_deadline);
+        return Err(ERROR_PLEDGE_DEADLINE_MISMATCH);
+    }
+    Ok(())
+}
+
 /// Sum the amounts of every pledge cell in `source` that belongs to this campaign.
 ///
 /// A pledge cell belongs to this campaign when its lock is the pledge-lock contract and
 /// the first 32 bytes of its lock args are this campaign's type script hash. That binding
 /// is the one pledge-lock itself uses to decide where funds route, so it is the binding
 /// worth accumulating against — the `campaign_id` field in pledge *data* is informational.
+/// A pledge that belongs to this campaign but carries another deadline is rejected.
 fn sum_campaign_pledges(
     source: Source,
     pledge_lock_code_hash: &[u8; 32],
     campaign_type_hash: &[u8; 32],
+    campaign_deadline: u64,
     enforce_minimum: bool,
 ) -> Result<u64, i8> {
     let mut total: u64 = 0;
@@ -224,6 +251,7 @@ fn sum_campaign_pledges(
         if lock_args.len() < 32 || &lock_args[0..32] != &campaign_type_hash[..] {
             continue;
         }
+        validate_pledge_deadline(&lock_args, campaign_deadline)?;
 
         let data = match load_cell_data(i, source) {
             Ok(d) => d,
@@ -279,6 +307,23 @@ fn validate_capacity_preserved() -> Result<(), i8> {
             input_capacity, output_capacity
         );
         return Err(ERROR_CAPACITY_DECREASED);
+    }
+
+    Ok(())
+}
+
+/// The campaign cell stays under its lock across every state transition.
+/// Otherwise a pledger could carry the campaign forward under their own lock and sit on
+/// finalization, or a finalizer could keep the cell so it is never destroyed back to the creator.
+fn validate_lock_preserved() -> Result<(), i8> {
+    let input_lock_hash = load_cell_lock_hash(0, Source::GroupInput)
+        .map_err(|_| ERROR_LOAD_CELL)?;
+    let output_lock_hash = load_cell_lock_hash(0, Source::GroupOutput)
+        .map_err(|_| ERROR_LOAD_CELL)?;
+
+    if input_lock_hash != output_lock_hash {
+        debug!("Campaign cell moved under another lock");
+        return Err(ERROR_CAMPAIGN_LOCK_CHANGED);
     }
 
     Ok(())
@@ -345,8 +390,8 @@ fn validate_pledge_update(
     // transaction nets to zero and is rejected below — merges leave the total untouched
     // and have no reason to consume the campaign cell.
     // The minimum applies to new pledges only; consumed ones were checked when created
-    let created = sum_campaign_pledges(Source::Output, pledge_lock_code_hash, &campaign_type_hash, true)?;
-    let consumed = sum_campaign_pledges(Source::Input, pledge_lock_code_hash, &campaign_type_hash, false)?;
+    let created = sum_campaign_pledges(Source::Output, pledge_lock_code_hash, &campaign_type_hash, old.deadline_block, true)?;
+    let consumed = sum_campaign_pledges(Source::Input, pledge_lock_code_hash, &campaign_type_hash, old.deadline_block, false)?;
 
     if created <= consumed {
         debug!("Pledge update: no net pledge inflow ({} in, {} out)", created, consumed);
@@ -506,20 +551,32 @@ fn validate_destruction_after_grace(campaign: &CampaignData) -> Result<(), i8> {
 /// destroy a finalized campaign and keep its capacity. No pledge-lock cell may be spent in
 /// the same transaction: a pledge release also pays the creator, and one creator output
 /// would then satisfy both scripts, letting the builder keep the difference.
+///
+/// For the same reason no other typed cell may be spent alongside: each campaign checks its own
+/// capacity against the creator's outputs, so two campaigns of one creator would both be
+/// satisfied by a single output (second review, finding 2). Matching on this script's code
+/// hash would miss a campaign of another deployment or hash type, so any other type is refused.
 fn validate_destruction_pays_creator(
     campaign: &CampaignData,
     pledge_lock_code_hash: &[u8; 32],
 ) -> Result<(), i8> {
+    let own_type_hash = load_script_hash().map_err(|_| ERROR_NO_SCRIPT)?;
     for i in 0.. {
-        match load_cell_lock(i, Source::Input) {
-            Ok(lock) => {
-                if lock.code_hash().raw_data().as_ref() == &pledge_lock_code_hash[..] {
-                    debug!("Campaign destruction blocked — pledge cell spent in the same transaction");
-                    return Err(ERROR_DESTRUCTION_WITH_PLEDGES);
-                }
-            }
+        let lock = match load_cell_lock(i, Source::Input) {
+            Ok(l) => l,
             Err(SysError::IndexOutOfBound) => break,
             Err(_) => return Err(ERROR_LOAD_CELL),
+        };
+        if lock.code_hash().raw_data().as_ref() == &pledge_lock_code_hash[..] {
+            debug!("Campaign destruction blocked — pledge cell spent in the same transaction");
+            return Err(ERROR_DESTRUCTION_WITH_PLEDGES);
+        }
+        match load_cell_type_hash(i, Source::Input).map_err(|_| ERROR_LOAD_CELL)? {
+            Some(hash) if hash != own_type_hash => {
+                debug!("Campaign destruction blocked — another typed cell in the transaction");
+                return Err(ERROR_DESTRUCTION_OTHER_TYPED_INPUT);
+            }
+            _ => {}
         }
     }
 
@@ -619,7 +676,7 @@ pub fn program_entry() -> i8 {
 
         // State transition: has input AND output.
         // A campaign that stays Active is a pledge accumulator update; anything else is a
-        // finalization. Both must preserve the cell's capacity.
+        // finalization. Both must preserve the cell's capacity and lock.
         (true, true) => {
             let old_data = match load_cell_data(0, Source::GroupInput) {
                 Ok(d) => d,
@@ -639,6 +696,9 @@ pub fn program_entry() -> i8 {
             };
 
             if let Err(code) = validate_capacity_preserved() {
+                return code;
+            }
+            if let Err(code) = validate_lock_preserved() {
                 return code;
             }
 
@@ -828,5 +888,38 @@ mod tests {
             validate_immutable_fields(&old_bytes, &new_bytes, &old, &new, 99),
             Err(99)
         );
+    }
+
+    fn pledge_lock_args(deadline: u64) -> [u8; 72] {
+        let mut args = [0u8; 72];
+        args[32..40].copy_from_slice(&deadline.to_le_bytes());
+        args
+    }
+
+    #[test]
+    fn test_pledge_deadline_matching_campaign_accepted() {
+        assert_eq!(validate_pledge_deadline(&pledge_lock_args(500), 500), Ok(()));
+    }
+
+    #[test]
+    fn test_pledge_deadline_zero_rejected() {
+        assert_eq!(validate_pledge_deadline(&pledge_lock_args(0), 500), Err(ERROR_PLEDGE_DEADLINE_MISMATCH));
+    }
+
+    #[test]
+    fn test_pledge_deadline_later_than_campaign_rejected() {
+        assert_eq!(validate_pledge_deadline(&pledge_lock_args(501), 500), Err(ERROR_PLEDGE_DEADLINE_MISMATCH));
+    }
+
+    #[test]
+    fn test_pledge_lock_args_without_deadline_rejected() {
+        assert_eq!(validate_pledge_deadline(&[0u8; 32], 500), Err(ERROR_PLEDGE_DEADLINE_MISMATCH));
+    }
+
+    #[test]
+    fn test_pledge_lock_args_pledge_lock_cannot_parse_rejected() {
+        // Right deadline, but only the first 40 of the 72 bytes pledge-lock requires
+        assert_eq!(validate_pledge_deadline(&pledge_lock_args(500)[..40], 500), Err(ERROR_PLEDGE_DEADLINE_MISMATCH));
+        assert_eq!(validate_pledge_deadline(&pledge_lock_args(500)[..71], 500), Err(ERROR_PLEDGE_DEADLINE_MISMATCH));
     }
 }

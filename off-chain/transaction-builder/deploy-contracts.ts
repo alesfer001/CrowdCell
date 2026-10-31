@@ -3,7 +3,9 @@
  *
  * Supports devnet, testnet, and mainnet via environment variables:
  *   CKB_NETWORK        - "devnet" (default), "testnet", or "mainnet"
- *   DEPLOYER_PRIVATE_KEY - Private key for the deployer account
+ *   DEPLOYER_PRIVATE_KEY - Private key for the deployer account. On testnet it falls back to
+ *                          DEPLOYER_PRIVATE_KEY in this directory's .env (gitignored), where
+ *                          the testnet deployer key is kept between deploys. Required on mainnet.
  *   CKB_RPC_URL         - Optional RPC URL override
  *
  * Examples:
@@ -11,12 +13,13 @@
  *   npx ts-node scripts/deploy-contracts.ts
  *
  *   # Testnet
- *   CKB_NETWORK=testnet DEPLOYER_PRIVATE_KEY=0x... npx ts-node scripts/deploy-contracts.ts
+ *   CKB_NETWORK=testnet npx ts-node deploy-contracts.ts
  */
 import { ccc } from "@ckb-ccc/core";
 import * as fs from "fs";
 import * as path from "path";
 import { createCkbClient, NetworkType } from "./src/ckbClient";
+import { deployerKeyFromEnvFile } from "./deployerKey";
 
 // --- Configuration from environment ---
 
@@ -25,12 +28,36 @@ const NETWORK = (process.env.CKB_NETWORK as NetworkType) || "devnet";
 // Default devnet private key (publicly known OffCKB account #0)
 const DEFAULT_DEVNET_KEY = "0x6109170b275a09ad54877b82f7d9930f88cab5717d484fb4741ae9d1dd078cd6";
 
-const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY || (NETWORK === "devnet" ? DEFAULT_DEVNET_KEY : "");
+// Devnet keeps the publicly known OffCKB account. The .env key is for testnet only, so mainnet
+// always needs DEPLOYER_PRIVATE_KEY set explicitly.
+const FALLBACK_KEYS: Record<NetworkType, () => string> = {
+  devnet: () => DEFAULT_DEVNET_KEY,
+  testnet: deployerKeyFromEnvFile,
+  mainnet: () => "",
+};
+const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY || FALLBACK_KEYS[NETWORK]();
 
 const RPC_URL = process.env.CKB_RPC_URL;
 
-async function deployContract(signer: ccc.Signer, binaryPath: string, name: string) {
+/** The last deployment on this network, by contract name, to reuse unchanged binaries from */
+function previousDeployment(): Record<string, { codeHash: string; txHash: string; index: number } | undefined> {
+  const manifest = path.resolve(__dirname, "..", "..", "deployment", `deployed-contracts-${NETWORK}.json`);
+  return fs.existsSync(manifest) ? JSON.parse(fs.readFileSync(manifest, "utf-8")) : {};
+}
+
+async function deployContract(signer: ccc.Signer, binaryPath: string, name: string, key: string) {
   const binary = fs.readFileSync(binaryPath);
+
+  // An unchanged binary already on chain costs nothing to reuse and about 1 CKB per byte to redeploy
+  const previous = previousDeployment()[key];
+  if (previous?.codeHash === ccc.hashCkb(binary)) {
+    const live = await signer.client.getCellLive({ txHash: previous.txHash, index: previous.index }, false);
+    if (live) {
+      console.log(`\nReusing ${name}: unchanged, live at ${previous.txHash}`);
+      return previous;
+    }
+  }
+
   console.log(`\nDeploying ${name} (${binary.length} bytes)...`);
 
   const tx = ccc.Transaction.from({
@@ -78,7 +105,7 @@ async function main() {
   console.log(`RPC URL:  ${RPC_URL}`);
 
   if (!PRIVATE_KEY) {
-    console.error("ERROR: DEPLOYER_PRIVATE_KEY environment variable is required for non-devnet deployments.");
+    console.error("ERROR: no deployer key. Set DEPLOYER_PRIVATE_KEY (required on mainnet; on testnet it can also come from .env).");
     process.exit(1);
   }
 
@@ -115,7 +142,7 @@ async function main() {
   );
 
   // Deploy campaign contract
-  const campaign = await deployContract(signer, campaignBinary, "Campaign");
+  const campaign = await deployContract(signer, campaignBinary, "Campaign", "campaign");
 
   // Wait for confirmation (important on testnet/mainnet)
   if (NETWORK !== "devnet") {
@@ -125,7 +152,7 @@ async function main() {
   }
 
   // Deploy campaign-lock contract (v1.1 trustless fund routing)
-  const campaignLock = await deployContract(signer, campaignLockBinary, "Campaign-Lock");
+  const campaignLock = await deployContract(signer, campaignLockBinary, "Campaign-Lock", "campaignLock");
 
   if (NETWORK !== "devnet") {
     await waitForTx(client, campaignLock.txHash);
@@ -134,7 +161,7 @@ async function main() {
   }
 
   // Deploy pledge contract
-  const pledge = await deployContract(signer, pledgeBinary, "Pledge");
+  const pledge = await deployContract(signer, pledgeBinary, "Pledge", "pledge");
 
   if (NETWORK !== "devnet") {
     await waitForTx(client, pledge.txHash);
@@ -143,7 +170,7 @@ async function main() {
   }
 
   // Deploy pledge-lock contract
-  const pledgeLock = await deployContract(signer, pledgeLockBinary, "Pledge-Lock");
+  const pledgeLock = await deployContract(signer, pledgeLockBinary, "Pledge-Lock", "pledgeLock");
 
   if (NETWORK !== "devnet") {
     await waitForTx(client, pledgeLock.txHash);
@@ -152,7 +179,7 @@ async function main() {
   }
 
   // Deploy receipt contract
-  const receipt = await deployContract(signer, receiptBinary, "Receipt");
+  const receipt = await deployContract(signer, receiptBinary, "Receipt", "receipt");
 
   if (NETWORK !== "devnet") {
     await waitForTx(client, receipt.txHash);
