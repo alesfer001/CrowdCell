@@ -189,7 +189,7 @@ async function main() {
     network: NETWORK,
     deployedAt: new Date().toISOString(),
     campaign: { codeHash: campaign.codeHash, txHash: campaign.txHash, index: campaign.index },
-    campaignLock: { codeHash: campaignLock.codeHash, hashType: "data", txHash: campaignLock.txHash, index: campaignLock.index },
+    campaignLock: { codeHash: campaignLock.codeHash, hashType: "data2", txHash: campaignLock.txHash, index: campaignLock.index },
     pledge: { codeHash: pledge.codeHash, txHash: pledge.txHash, index: pledge.index },
     pledgeLock: { codeHash: pledgeLock.codeHash, txHash: pledgeLock.txHash, index: pledgeLock.index },
     receipt: { codeHash: receipt.codeHash, txHash: receipt.txHash, index: receipt.index },

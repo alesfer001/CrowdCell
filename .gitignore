@@ -28,6 +28,7 @@ docs/
 deployment/*
 !deployment/deployed-contracts-devnet.json
 !deployment/deployed-contracts-testnet.json
+!deployment/checksums-testnet.txt
 
 
 # Indexer SQLite data
