@@ -39,28 +39,12 @@ import { SkeletonDetailPage } from "@/components/Skeleton";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
 import { useCellNames } from "@/components/CellName";
 import { VellumIdentityLink } from "@/components/VellumIdentityLink";
+import { campaignCellWaitMs, isPoolPendingError, waitForCampaignCellToMove } from "@/lib/pledgeRetry";
 
 type PledgeSortMode = "recent" | "amount";
 
 /** Pledge attempts before giving up when other pledges keep winning the campaign cell */
 const PLEDGE_ATTEMPTS = 3;
-
-/** How long to wait for the winning pledge to commit before rebuilding anyway */
-const CAMPAIGN_CELL_MOVE_TIMEOUT_MS = 30000;
-
-/**
- * Wait until the campaign cell has moved past a spent out point, so a rebuilt pledge
- * does not pick the same dead cell again. Gives up quietly after a timeout: when the cell
- * never moves the failure was a stale wallet cell, and rebuilding is still the fix.
- */
-async function waitForCampaignCellToMove(client: ccc.Client, campaignId: string, spent: ccc.OutPoint) {
-  const deadline = Date.now() + CAMPAIGN_CELL_MOVE_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const { cell } = await resolveLiveCampaignCell(client, campaignId);
-    if (!cell.outPoint.eq(spent)) return;
-  }
-}
 
 export default function CampaignDetailPage() {
   const params = useParams();
@@ -342,7 +326,13 @@ export default function CampaignDetailPage() {
             throw sendError;
           }
           toast("info", "Another pledge landed at the same moment. Updating yours to go on top of it…");
-          await waitForCampaignCellToMove(client, campaign.campaignId, campaignCell.outPoint);
+          // An RBF refusal means the winner is still in the pool: wait longer for it to commit
+          const poolPending = sendError instanceof ccc.ErrorClientRBFRejected || isPoolPendingError(sendError);
+          const spent = campaignCell.outPoint;
+          await waitForCampaignCellToMove(
+            async () => !(await resolveLiveCampaignCell(client, campaign.campaignId)).cell.outPoint.eq(spent),
+            campaignCellWaitMs(poolPending)
+          );
           if (!isDevnet) toast("info", "Please approve the updated pledge in your wallet");
         }
       }
