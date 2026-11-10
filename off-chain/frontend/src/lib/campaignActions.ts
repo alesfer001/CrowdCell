@@ -257,10 +257,17 @@ export async function sendReclaimReceipts(
     throw new Error("The campaign has to be finalized before deposits can be reclaimed");
   }
 
+  // The deposits always go back to the connected wallet. A receipt's data names its backer, but
+  // the receipt contract doesn't tie that to the cell's lock, so anyone can create a receipt
+  // naming this wallet under a lock they control. Only receipts this wallet can spend are taken,
+  // and the output never follows a receipt's lock.
+  const walletLock = (await ccc.Address.fromString(await signer.getRecommendedAddress(), client)).script;
+  const walletLockHash = walletLock.hash().toLowerCase();
+
   const inputs: { previousOutput: { txHash: string; index: number } }[] = [];
   let total = BigInt(0);
-  let lock: ccc.Script | undefined;
   let legacy = 0;
+  let foreign = 0;
   for (const receipt of receipts) {
     const receiptTx = await client.getTransaction(receipt.txHash);
     const output = receiptTx?.transaction?.outputs[receipt.index];
@@ -271,17 +278,27 @@ export async function sendReclaimReceipts(
       legacy++;
       continue;
     }
+    if (ccc.Script.from(output.lock).hash().toLowerCase() !== walletLockHash) {
+      console.warn(`Skipping receipt ${receipt.txHash}_${receipt.index}: its cell isn't locked by this wallet`);
+      foreign++;
+      continue;
+    }
     inputs.push({ previousOutput: { txHash: receipt.txHash, index: receipt.index } });
     total += BigInt(output.capacity);
-    lock = ccc.Script.from(output.lock);
   }
-  if (inputs.length === 0 || !lock) {
-    throw new Error(legacy > 0 ? "These receipts predate v1.2 and can't be reclaimed here" : "No receipts found to reclaim");
+  if (inputs.length === 0) {
+    throw new Error(
+      foreign > 0
+        ? "None of these receipts are held by the connected wallet, so there is nothing it can reclaim"
+        : legacy > 0
+          ? "These receipts predate v1.2 and can't be reclaimed here"
+          : "No receipts found to reclaim"
+    );
   }
 
   const tx = ccc.Transaction.from({
     inputs,
-    outputs: [{ capacity: total, lock }],
+    outputs: [{ capacity: total, lock: walletLock }],
     outputsData: ["0x"],
     cellDeps: [
       { outPoint: campaignCell.outPoint, depType: "code" },
