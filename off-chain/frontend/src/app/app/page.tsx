@@ -168,20 +168,6 @@ export default function CampaignsApp() {
 
           <IndexerWaitNotice phase={indexerPhase} elapsedSeconds={elapsedSeconds} onRetry={retryIndexer} />
 
-          {showSkeletons && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-              {[1, 2, 3, 4].map((i) => (
-                <SkeletonCard key={i} />
-              ))}
-            </div>
-          )}
-
-          {showContent && error && (
-            <div className="bg-bad-soft border border-bad/30 rounded-[14px] p-4">
-              <p className="text-bad">{error}</p>
-            </div>
-          )}
-
           {indexerReady && (
             <div className="flex gap-2.5 flex-wrap mb-4">
               <input
@@ -206,6 +192,20 @@ export default function CampaignsApp() {
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {showSkeletons && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {[1, 2, 3, 4].map((i) => (
+                <SkeletonCard key={i} />
+              ))}
+            </div>
+          )}
+
+          {showContent && error && (
+            <div className="bg-bad-soft border border-bad/30 rounded-[14px] p-4">
+              <p className="text-bad">{error}</p>
             </div>
           )}
 
