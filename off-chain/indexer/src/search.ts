@@ -4,6 +4,7 @@ import { categorySlug, isCategorySlug } from "./categories";
 /** Longest search text the API accepts */
 export const MAX_QUERY_LENGTH = 100;
 
+/** Search and category filter for GET /campaigns, parsed from its query string */
 export interface CampaignFilter {
   /** Lower-cased search words; every one must match */
   terms: string[];
@@ -41,7 +42,10 @@ export function matchesCampaignFilter(campaign: Campaign, filter: CampaignFilter
   if (filter.terms.length === 0) return true;
 
   const text = `${campaign.title ?? ""}\n${campaign.description ?? ""}`.toLowerCase();
-  const hashes = [campaign.id, campaign.txHash, campaign.originalTxHash ?? "", campaign.creatorLockHash].map((h) =>
+  // The cards link by `<creation tx>_0` (canonicalCampaignId), which stops being the cell's
+  // out point once a pledge moves it, so that id is matched too.
+  const creationTx = campaign.originalTxHash || campaign.txHash;
+  const hashes = [campaign.id, campaign.txHash, creationTx, `${creationTx}_0`, campaign.creatorLockHash].map((h) =>
     h.toLowerCase()
   );
 

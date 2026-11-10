@@ -103,34 +103,6 @@ export function serializeCampaignData(params: CampaignParams): string {
 }
 
 /**
- * Serialize campaign data with explicit totalPledged and status values
- * Used for finalization (state transition). Preserves metadata if provided.
- */
-export function serializeCampaignDataWithStatus(
-  data: { creatorLockHash: string; fundingGoal: bigint; deadlineBlock: bigint; totalPledged: bigint; title?: string; description?: string },
-  status: CampaignStatus
-): string {
-  const creatorHash = data.creatorLockHash.startsWith("0x")
-    ? data.creatorLockHash.slice(2)
-    : data.creatorLockHash;
-
-  const fundingGoal = u64ToHexLE(data.fundingGoal);
-  const deadlineBlock = u64ToHexLE(data.deadlineBlock);
-  const totalPledged = u64ToHexLE(data.totalPledged);
-  const statusHex = status.toString(16).padStart(2, "0");
-  const reserved = "00".repeat(8);
-
-  let hex = creatorHash + fundingGoal + deadlineBlock + totalPledged + statusHex + reserved;
-
-  // Preserve metadata during finalization
-  if (data.title || data.description) {
-    hex += serializeMetadata(data.title, data.description);
-  }
-
-  return "0x" + hex;
-}
-
-/**
  * Serialize pledge data to bytes for creating pledge cell
  * Layout (72 bytes):
  * - campaign_id: [u8; 32]        (bytes 0-31)

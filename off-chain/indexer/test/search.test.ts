@@ -70,6 +70,13 @@ test("search finds a campaign by id or creator hash prefix", () => {
   assert.ok(!matchesCampaignFilter(c, filter({ q: "0xdead00" })));
 });
 
+test("search finds a moved campaign by the canonical id the cards link to", () => {
+  const moved = { ...campaign("x", "y"), id: "0x" + "dd".repeat(32) + "_1", txHash: "0x" + "dd".repeat(32),
+    originalTxHash: "0x" + "c0ffee".padEnd(64, "0") };
+  assert.ok(matchesCampaignFilter(moved, filter({ q: moved.originalTxHash + "_0" })));
+  assert.ok(matchesCampaignFilter(moved, filter({ q: moved.originalTxHash })));
+});
+
 test("category filter", () => {
   const c = campaign("Garden", "", 6);
   assert.ok(matchesCampaignFilter(c, filter({ category: "community" })));

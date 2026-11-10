@@ -87,23 +87,29 @@ export default function CampaignsApp() {
     if (!isRefresh) setLoading(true);
 
     try {
-      const [campaignsData, blockNum] = await Promise.all([
-        fetchCampaigns({ q: search, category: category || undefined }),
-        fetchBlockNumber(),
-      ]);
+      const campaignsData = await fetchCampaigns({ q: search, category: category || undefined });
       if (id !== requestId.current) return;
 
       setCampaigns(campaignsData);
-      setCurrentBlock(blockNum);
       setError(null);
       loadedOnce.current = true;
     } catch (err) {
       if (id !== requestId.current) return;
       setError(err instanceof Error ? err.message : "Failed to load campaigns");
     } finally {
-      if (!isRefresh && id === requestId.current) setLoading(false);
+      // Whichever request is latest clears the flag, even a refresh that superseded the first load
+      if (id === requestId.current) setLoading(false);
     }
   }, [search, category]);
+
+  // The tip doesn't depend on the search, so it loads on its own, not with every keystroke
+  const loadBlock = useCallback(async () => {
+    try {
+      setCurrentBlock(await fetchBlockNumber());
+    } catch {
+      // keep the last known tip
+    }
+  }, []);
 
   // Debounce typing into the search box
   useEffect(() => {
@@ -118,12 +124,20 @@ export default function CampaignsApp() {
     load(loadedOnce.current);
   }, [indexerReady, load]);
 
+  useEffect(() => {
+    if (!indexerReady) return;
+    loadBlock();
+  }, [indexerReady, loadBlock]);
+
   // Auto-refresh every 30 seconds
   useEffect(() => {
     if (!indexerReady) return;
-    const interval = setInterval(() => load(true), 30000);
+    const interval = setInterval(() => {
+      load(true);
+      loadBlock();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [indexerReady, load]);
+  }, [indexerReady, load, loadBlock]);
 
   const showSkeletons = indexerReady ? loading : indexerPhase !== IndexerPhase.Offline;
   const showContent = indexerReady && !loading;
