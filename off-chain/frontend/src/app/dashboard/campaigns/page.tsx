@@ -93,7 +93,7 @@ export default function MyCampaignsPage() {
 
   async function runAction(campaign: WalletCampaign, kind: ActionKind) {
     if (!signer) return;
-    setBusy({ id: campaign.campaignId, kind });
+    setBusy({ id: canonicalCampaignId(campaign), kind });
     setLastTx(null);
     try {
       // The out point the dashboard holds may be stale: since v1.2 every pledge moves the
@@ -115,7 +115,7 @@ export default function MyCampaignsPage() {
           ? await sendRelease(signer, live, pledges[0])
           : await sendRefund(signer, live, pledges[0]);
       }
-      setLastTx({ id: campaign.campaignId, hash });
+      setLastTx({ id: canonicalCampaignId(campaign), hash });
       toast("success", {
         finalize: "Campaign finalized",
         release: "Pledge released to you",
@@ -192,12 +192,12 @@ export default function MyCampaignsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {campaigns.map((c) => (
               <CampaignRow
-                key={c.campaignId}
+                key={canonicalCampaignId(c)}
                 campaign={c}
                 currentBlock={currentBlock}
-                busy={busy?.id === c.campaignId ? busy.kind : null}
+                busy={busy?.id === canonicalCampaignId(c) ? busy.kind : null}
                 anyBusy={busy !== null}
-                txHash={lastTx?.id === c.campaignId ? lastTx.hash : null}
+                txHash={lastTx?.id === canonicalCampaignId(c) ? lastTx.hash : null}
                 onAction={(kind) => runAction(c, kind)}
               />
             ))}

@@ -89,6 +89,17 @@ export async function sendFinalize(signer: ccc.Signer, campaign: Campaign): Prom
 }
 
 /**
+ * Send a transaction that needs no signature: every input is a pledge cell, whose lock lets
+ * anyone settle it, and the fee comes out of the pledge. Going through the wallet would ask it
+ * to sign a transaction it has no inputs in, which JoyID refuses ("Witnesses cannot be empty"),
+ * so it goes straight to the node with an empty witness per input.
+ */
+async function sendUnsigned(client: ccc.Client, tx: ccc.Transaction): Promise<string> {
+  tx.witnesses = tx.inputs.map(() => "0x");
+  return client.sendTransaction(tx);
+}
+
+/**
  * Load a pledge cell's output and its backer's full lock. The pledge cell only stores the
  * backer's lock hash; the full lock is among the outputs of the transaction that created it
  * (the receipt is always one of them).
@@ -111,7 +122,7 @@ async function loadPledgeCell(client: ccc.Client, pledge: Pledge) {
 
 /**
  * Release one pledge of a funded campaign to its creator. Permissionless: the fee comes out of
- * the pledge cell, so the sending wallet adds no inputs.
+ * the pledge cell, and no wallet signs it.
  */
 export async function sendRelease(signer: ccc.Signer, campaign: Campaign, pledge: Pledge): Promise<string> {
   const { capacity: pledgeCapacity, backerLock } = await loadPledgeCell(signer.client, pledge);
@@ -144,7 +155,7 @@ export async function sendRelease(signer: ccc.Signer, campaign: Campaign, pledge
     ],
   });
 
-  return signer.sendTransaction(tx);
+  return sendUnsigned(signer.client, tx);
 }
 
 /**
@@ -169,7 +180,7 @@ export async function sendRefund(signer: ccc.Signer, campaign: Campaign, pledge:
     ],
   });
 
-  return signer.sendTransaction(tx);
+  return sendUnsigned(signer.client, tx);
 }
 
 /**
