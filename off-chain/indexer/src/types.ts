@@ -9,6 +9,7 @@ export interface CampaignData {
   status: CampaignStatus;
   title?: string; // Variable-length metadata appended after the 65-byte header
   description?: string;
+  category?: number; // Category byte after the description, see categories.ts
 }
 
 export enum CampaignStatus {

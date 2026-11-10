@@ -23,6 +23,7 @@ import {
   calculateCostBreakdown,
   formatCost,
 } from "@/lib/utils";
+import { categoryLabel } from "@/lib/categories";
 import { CONTRACTS, MIN_PLEDGE_CKB, PLEDGE_CELL_OVERHEAD, RECEIPT_CELL_CAPACITY, EXPLORER_URL, GRACE_PERIOD_BLOCKS } from "@/lib/constants";
 import {
   u64ToHexLE,
@@ -812,6 +813,11 @@ export default function CampaignDetailPage() {
                     <p className="text-sm text-ink-3 mb-1">Campaign ID</p>
                     <p className="font-mono text-sm break-all">{campaign.campaignId}</p>
                   </>
+                )}
+                {categoryLabel(campaign.category) && (
+                  <p className="font-mono text-[11px] tracking-wider uppercase text-ink-3 mt-1.5">
+                    {categoryLabel(campaign.category)}
+                  </p>
                 )}
               </div>
               <span

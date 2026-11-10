@@ -6,11 +6,23 @@ function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, init);
 }
 
+/** Search and category filter for the campaign list */
+export interface CampaignQuery {
+  /** Words to find in the title or description, or a campaign/creator hash prefix */
+  q?: string;
+  /** Category slug */
+  category?: string;
+}
+
 /**
- * Fetch all campaigns from the indexer
+ * Fetch campaigns from the indexer, optionally filtered by search text and category
  */
-export async function fetchCampaigns(): Promise<Campaign[]> {
-  const res = await apiFetch(`${API_BASE}/campaigns`);
+export async function fetchCampaigns(query: CampaignQuery = {}): Promise<Campaign[]> {
+  const params = new URLSearchParams();
+  if (query.q?.trim()) params.set("q", query.q.trim());
+  if (query.category) params.set("category", query.category);
+  const qs = params.toString();
+  const res = await apiFetch(`${API_BASE}/campaigns${qs ? `?${qs}` : ""}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch campaigns: ${res.statusText}`);
   }

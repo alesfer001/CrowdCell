@@ -74,7 +74,9 @@ export class TransactionBuilder {
     console.log(`Campaign data: ${campaignData}`);
 
     // Calculate required capacity (65 bytes header + metadata)
-    const metadataSize = (params.title || params.description) ? getMetadataSize(params.title, params.description) : 0;
+    const metadataSize = (params.title || params.description || params.category !== undefined)
+      ? getMetadataSize(params.title, params.description, params.category)
+      : 0;
     const dataSize = 65 + metadataSize;
     // v1.2: campaign type args are 64 bytes (TypeID + pledge-lock code hash), not 32
     const capacity = calculateCellCapacity(dataSize, true, 65, CAMPAIGN_TYPE_ARGS_SIZE);

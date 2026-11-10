@@ -32,10 +32,11 @@ export function encodeDeadlineBlockAsLockArgs(deadlineBlock: bigint | number): s
 }
 
 /**
- * Serialize campaign metadata (title + description) to hex string.
+ * Serialize campaign metadata (title + description + optional category) to hex string.
  * Layout: title_len (u16 LE) + title (UTF-8) + description_len (u16 LE) + description (UTF-8)
+ *         + category (u8, optional; codes in off-chain/indexer/src/categories.ts)
  */
-export function serializeMetadata(title?: string, description?: string): string {
+export function serializeMetadata(title?: string, description?: string, category?: number): string {
   const titleBytes = new TextEncoder().encode(title || "");
   const descBytes = new TextEncoder().encode(description || "");
 
@@ -47,16 +48,23 @@ export function serializeMetadata(title?: string, description?: string): string 
   for (const b of descBytes) {
     hex += b.toString(16).padStart(2, "0");
   }
+  if (category !== undefined) {
+    if (!Number.isInteger(category) || category < 1 || category > 255) {
+      throw new Error(`Invalid campaign category: ${category}`);
+    }
+    hex += category.toString(16).padStart(2, "0");
+  }
   return hex;
 }
 
 /**
  * Get the total byte size of serialized metadata
  */
-export function getMetadataSize(title?: string, description?: string): number {
+export function getMetadataSize(title?: string, description?: string, category?: number): number {
   const titleLen = new TextEncoder().encode(title || "").length;
   const descLen = new TextEncoder().encode(description || "").length;
-  return 2 + titleLen + 2 + descLen; // u16 + title + u16 + description
+  // u16 + title + u16 + description (+ category byte)
+  return 2 + titleLen + 2 + descLen + (category !== undefined ? 1 : 0);
 }
 
 /**
@@ -71,6 +79,7 @@ export function getMetadataSize(title?: string, description?: string): number {
  * - metadata (optional):
  *   - title_len: u16 LE          + title: [u8; title_len]
  *   - description_len: u16 LE    + description: [u8; description_len]
+ *   - category: u8 (optional)
  */
 export function serializeCampaignData(params: CampaignParams): string {
   const creatorHash = params.creatorLockHash.startsWith("0x")
@@ -86,8 +95,8 @@ export function serializeCampaignData(params: CampaignParams): string {
   let hex = creatorHash + fundingGoal + deadlineBlock + totalPledged + status + reserved;
 
   // Append metadata if provided
-  if (params.title || params.description) {
-    hex += serializeMetadata(params.title, params.description);
+  if (params.title || params.description || params.category !== undefined) {
+    hex += serializeMetadata(params.title, params.description, params.category);
   }
 
   return "0x" + hex;

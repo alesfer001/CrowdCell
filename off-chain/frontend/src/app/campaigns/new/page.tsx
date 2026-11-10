@@ -10,6 +10,7 @@ import { useDevnet } from "@/components/DevnetContext";
 import { useToast } from "@/components/Toast";
 import { fetchBlockNumber, fetchCampaign } from "@/lib/api";
 import { IndexerPhase } from "@/lib/types";
+import { CAMPAIGN_CATEGORIES } from "@/lib/categories";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
 
 /** The browser's time zone; null during the server render, which cannot know it */
@@ -34,6 +35,7 @@ export default function CreateCampaignPage() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("");
   const [fundingGoal, setFundingGoal] = useState("");
   const [deadlineDateTime, setDeadlineDateTime] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,6 +46,7 @@ export default function CreateCampaignPage() {
 
   // Field-level validation errors
   const [titleError, setTitleError] = useState<string | null>(null);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [goalError, setGoalError] = useState<string | null>(null);
   const [deadlineError, setDeadlineError] = useState<string | null>(null);
 
@@ -57,6 +60,15 @@ export default function CreateCampaignPage() {
       .then(setCurrentBlock)
       .catch(() => {});
   }, [indexerUp]);
+
+  function validateCategory(): boolean {
+    if (!CAMPAIGN_CATEGORIES.some((c) => c.slug === category)) {
+      setCategoryError("Choose a category");
+      return false;
+    }
+    setCategoryError(null);
+    return true;
+  }
 
   function validateTitle(): boolean {
     if (!title.trim()) {
@@ -118,9 +130,10 @@ export default function CreateCampaignPage() {
 
     // Validate all fields
     const titleValid = validateTitle();
+    const categoryValid = validateCategory();
     const goalValid = validateGoal();
     const deadlineValid = validateDeadline();
-    if (!titleValid || !goalValid || !deadlineValid) return;
+    if (!titleValid || !categoryValid || !goalValid || !deadlineValid) return;
 
     const goal = parseFloat(fundingGoal);
     const deadline = datetimeToBlockNumber(deadlineDateTime, currentBlock!);
@@ -148,9 +161,9 @@ export default function CreateCampaignPage() {
         "00" +
         "00".repeat(8);
 
-      if (title.trim() || description.trim()) {
-        campaignHex += serializeMetadataHex(title.trim(), description.trim());
-      }
+      // Title is required, so the metadata is always there; the category byte follows the description
+      const categoryCode = CAMPAIGN_CATEGORIES.find((c) => c.slug === category)!.code;
+      campaignHex += serializeMetadataHex(title.trim(), description.trim(), categoryCode);
 
       const campaignData = "0x" + campaignHex;
 
@@ -347,6 +360,39 @@ export default function CreateCampaignPage() {
             >
               {descLen}/2000
             </span>
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="category" className="block text-sm font-medium mb-2">
+            Category <span className="text-red-500">*</span>
+          </label>
+          <select
+            id="category"
+            value={category}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              if (categoryError) setCategoryError(null);
+            }}
+            onBlur={validateCategory}
+            className={`w-full px-4 py-2 border rounded-lg bg-surface-2 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              categoryError ? "border-red-400 dark:border-red-600" : "border-line"
+            }`}
+            disabled={loading}
+          >
+            <option value="">Choose a category</option>
+            {CAMPAIGN_CATEGORIES.map((c) => (
+              <option key={c.slug} value={c.slug}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <div className="mt-1">
+            {categoryError ? (
+              <p className="text-sm text-red-600 dark:text-red-400">{categoryError}</p>
+            ) : (
+              <p className="text-sm text-ink-3">Helps backers find your campaign (stored on-chain)</p>
+            )}
           </div>
         </div>
 

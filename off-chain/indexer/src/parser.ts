@@ -46,8 +46,10 @@ export function parseCampaignData(hexData: string): CampaignData {
 
   // Parse optional metadata after the 65-byte header
   // Layout: title_len (u16 LE) + title (UTF-8) + description_len (u16 LE) + description (UTF-8)
+  //         + category (u8, optional; absent on campaigns created before categories)
   let title: string | undefined;
   let description: string | undefined;
+  let category: number | undefined;
 
   const metadataStart = 130; // 65 bytes = 130 hex chars
   if (data.length > metadataStart + 4) {
@@ -60,26 +62,31 @@ export function parseCampaignData(hexData: string): CampaignData {
       offset += 4;
 
       // Parse title bytes
-      if (titleLen > 0 && offset + titleLen * 2 <= data.length) {
-        const titleHex = data.slice(offset, offset + titleLen * 2);
-        title = hexToUtf8(titleHex);
-        offset += titleLen * 2;
+      if (offset + titleLen * 2 > data.length) throw new Error("title overruns data");
+      if (titleLen > 0) {
+        title = hexToUtf8(data.slice(offset, offset + titleLen * 2));
       }
+      offset += titleLen * 2;
 
       // Parse description_len (u16 LE = 4 hex chars)
       if (offset + 4 <= data.length) {
-        const descLenHex = data.slice(offset, offset + 4);
-        const descLen = hexToU16LE(descLenHex);
+        const descLen = hexToU16LE(data.slice(offset, offset + 4));
         offset += 4;
 
         // Parse description bytes
-        if (descLen > 0 && offset + descLen * 2 <= data.length) {
-          const descHex = data.slice(offset, offset + descLen * 2);
-          description = hexToUtf8(descHex);
+        if (offset + descLen * 2 > data.length) throw new Error("description overruns data");
+        if (descLen > 0) {
+          description = hexToUtf8(data.slice(offset, offset + descLen * 2));
+        }
+        offset += descLen * 2;
+
+        // Parse the category byte
+        if (offset + 2 <= data.length) {
+          category = parseInt(data.slice(offset, offset + 2), 16);
         }
       }
     } catch {
-      // Metadata parsing failed — ignore and return without metadata
+      // Metadata parsing failed — keep whatever parsed before the error
     }
   }
 
@@ -91,6 +98,7 @@ export function parseCampaignData(hexData: string): CampaignData {
     status,
     title,
     description,
+    category,
   };
 }
 

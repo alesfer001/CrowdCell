@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import { CampaignIndexer } from "./indexer";
 import { Campaign, Pledge, Receipt } from "./types";
+import { categorySlug } from "./categories";
+import { parseCampaignFilter, matchesCampaignFilter } from "./search";
 import {
   canReclaimDeposits,
   computeEffectiveStatus,
@@ -48,10 +50,14 @@ export class IndexerAPI {
       res.json({ status: "ok", ready: this.indexer.isReady(), timestamp: Date.now() });
     });
 
-    // Get all campaigns
+    // Campaigns, optionally filtered: ?q=words&category=slug (M1 search)
     this.app.get("/campaigns", async (req, res) => {
       try {
-        const campaigns = this.indexer.getCampaigns();
+        const filter = parseCampaignFilter(req.query as Record<string, unknown>);
+        if ("error" in filter) {
+          return res.status(400).json({ error: filter.error });
+        }
+        const campaigns = this.indexer.getCampaigns().filter((c) => matchesCampaignFilter(c, filter));
         const currentBlock = await this.indexer.getCurrentBlockNumber();
 
         res.json(campaigns.map((c) => this.serializeCampaign(c, currentBlock)));
@@ -217,6 +223,7 @@ export class IndexerAPI {
       creatorLockScript: c.creatorLockScript || null,
       title: c.title,
       description: c.description,
+      category: categorySlug(c.category),
       fundingGoal: c.fundingGoal.toString(),
       deadlineBlock: c.deadlineBlock.toString(),
       totalPledged: c.totalPledged.toString(),

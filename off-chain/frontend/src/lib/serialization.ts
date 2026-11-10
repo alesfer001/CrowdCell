@@ -31,8 +31,11 @@ export function u16ToHexLE(value: number): string {
   return hex.slice(2, 4) + hex.slice(0, 2);
 }
 
-/** Serialize metadata (title + description) to hex string */
-export function serializeMetadataHex(title: string, description: string): string {
+/**
+ * Serialize metadata to hex: title_len (u16 LE) + title + description_len (u16 LE) + description,
+ * then the category byte when one is given.
+ */
+export function serializeMetadataHex(title: string, description: string, categoryCode?: number): string {
   const titleBytes = new TextEncoder().encode(title);
   const descBytes = new TextEncoder().encode(description);
 
@@ -43,6 +46,12 @@ export function serializeMetadataHex(title: string, description: string): string
   hex += u16ToHexLE(descBytes.length);
   for (const b of descBytes) {
     hex += b.toString(16).padStart(2, "0");
+  }
+  if (categoryCode !== undefined) {
+    if (!Number.isInteger(categoryCode) || categoryCode < 1 || categoryCode > 255) {
+      throw new Error(`Invalid campaign category: ${categoryCode}`);
+    }
+    hex += categoryCode.toString(16).padStart(2, "0");
   }
   return hex;
 }

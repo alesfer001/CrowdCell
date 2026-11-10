@@ -19,6 +19,8 @@ export interface Campaign {
   creatorLockScript?: CreatorLockScript | null;
   title?: string;
   description?: string;
+  /** Category slug (see lib/categories.ts); null for campaigns created before categories */
+  category?: string | null;
   fundingGoal: string;
   deadlineBlock: string;
   totalPledged: string;

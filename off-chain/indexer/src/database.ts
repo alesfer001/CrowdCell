@@ -18,6 +18,7 @@ export interface DBCampaign {
   description: string | null;
   created_at: string;
   original_tx_hash: string | null;
+  category: number | null;
 }
 
 export interface DBPledge {
@@ -82,7 +83,8 @@ export class Database {
         title TEXT,
         description TEXT,
         created_at TEXT NOT NULL,
-        original_tx_hash TEXT
+        original_tx_hash TEXT,
+        category INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS pledges (
@@ -145,6 +147,11 @@ export class Database {
       this.db.exec("ALTER TABLE pledges ADD COLUMN backer_lock_args TEXT");
     }
 
+    // Campaign category byte (M1)
+    if (!columnNames.has("category")) {
+      this.db.exec("ALTER TABLE campaigns ADD COLUMN category INTEGER");
+    }
+
     // Receipt cell capacity, so dashboards can show the deposit a backer gets back (M1)
     const receiptColumns = this.db.prepare("PRAGMA table_info(receipts)").all() as { name: string }[];
     if (!receiptColumns.some((c) => c.name === "capacity")) {
@@ -158,8 +165,8 @@ export class Database {
    */
   replaceLiveCells(campaigns: DBCampaign[], pledges: DBPledge[], receipts: DBReceipt[] = []) {
     const insertCampaign = this.db.prepare(`
-      INSERT OR REPLACE INTO campaigns (id, tx_hash, output_index, creator_lock_hash, creator_lock_code_hash, creator_lock_hash_type, creator_lock_args, funding_goal, deadline_block, total_pledged, status, title, description, created_at, original_tx_hash)
-      VALUES (@id, @tx_hash, @output_index, @creator_lock_hash, @creator_lock_code_hash, @creator_lock_hash_type, @creator_lock_args, @funding_goal, @deadline_block, @total_pledged, @status, @title, @description, @created_at, @original_tx_hash)
+      INSERT OR REPLACE INTO campaigns (id, tx_hash, output_index, creator_lock_hash, creator_lock_code_hash, creator_lock_hash_type, creator_lock_args, funding_goal, deadline_block, total_pledged, status, title, description, created_at, original_tx_hash, category)
+      VALUES (@id, @tx_hash, @output_index, @creator_lock_hash, @creator_lock_code_hash, @creator_lock_hash_type, @creator_lock_args, @funding_goal, @deadline_block, @total_pledged, @status, @title, @description, @created_at, @original_tx_hash, @category)
     `);
 
     const insertPledge = this.db.prepare(`

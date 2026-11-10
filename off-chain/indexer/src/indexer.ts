@@ -335,6 +335,7 @@ export class CampaignIndexer {
           description: data.description || null,
           created_at: blockNumber.toString(),
           original_tx_hash: originalTxHash || null,
+          category: data.category ?? null,
         });
       } catch (error) {
         console.error("Error parsing campaign cell:", error);
@@ -550,6 +551,7 @@ export class CampaignIndexer {
       description: row.description || undefined,
       createdAt: BigInt(row.created_at),
       originalTxHash: row.original_tx_hash || undefined,
+      category: row.category ?? undefined,
       creatorLockScript: row.creator_lock_code_hash
         ? {
             codeHash: row.creator_lock_code_hash,
