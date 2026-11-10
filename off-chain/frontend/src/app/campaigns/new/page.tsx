@@ -367,6 +367,7 @@ export default function CreateCampaignPage() {
           <label htmlFor="category" className="block text-sm font-medium mb-2">
             Category <span className="text-red-500">*</span>
           </label>
+          <div className="relative">
           <select
             id="category"
             value={category}
@@ -375,7 +376,7 @@ export default function CreateCampaignPage() {
               if (categoryError) setCategoryError(null);
             }}
             onBlur={validateCategory}
-            className={`w-full px-4 py-2 border rounded-lg bg-surface-2 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+            className={`w-full appearance-none pl-4 pr-10 py-2 border rounded-lg bg-surface-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${
               categoryError ? "border-red-400 dark:border-red-600" : "border-line"
             }`}
             disabled={loading}
@@ -387,6 +388,14 @@ export default function CreateCampaignPage() {
               </option>
             ))}
           </select>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-3"
+          >
+            <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          </div>
           <div className="mt-1">
             {categoryError ? (
               <p className="text-sm text-red-600 dark:text-red-400">{categoryError}</p>

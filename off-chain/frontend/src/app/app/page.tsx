@@ -179,19 +179,28 @@ export default function CampaignsApp() {
                 aria-label="Search campaigns"
                 className={`${FIELD} flex-1 min-w-[200px]`}
               />
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                aria-label="Category"
-                className={FIELD}
+              <div className="relative">
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  aria-label="Category"
+                  className={`${FIELD} appearance-none pl-3.5 pr-10 min-w-[180px] cursor-pointer`}
+                >
+                  <option value="">All categories</option>
+                  {CAMPAIGN_CATEGORIES.map((c) => (
+                    <option key={c.slug} value={c.slug}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-3"
               >
-                <option value="">All categories</option>
-                {CAMPAIGN_CATEGORIES.map((c) => (
-                  <option key={c.slug} value={c.slug}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
+                <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              </div>
             </div>
           )}
 
