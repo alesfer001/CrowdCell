@@ -13,9 +13,12 @@ export const SECONDARY_BUTTON =
   "inline-flex items-center justify-center px-4 py-2.5 rounded-lg font-semibold text-sm border border-line hover:bg-surface-3 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]";
 export const CARD = "bg-surface-2 border border-line rounded-[14px] p-[18px] flex flex-col gap-3";
 
-/** How often, and how many times, to reload after sending a transaction until the indexer shows it */
-export const REFRESH_INTERVAL_MS = 4000;
-export const REFRESH_ATTEMPTS = 10;
+/**
+ * How often, and how many times, to reload after sending a transaction until the indexer shows
+ * it. Covers ~90 s: a block or two to commit, plus an indexer polling every 60 s at worst.
+ */
+export const REFRESH_INTERVAL_MS = 5000;
+export const REFRESH_ATTEMPTS = 18;
 
 const TABS = [
   { href: "/dashboard/campaigns", label: "My campaigns" },
