@@ -28,13 +28,13 @@ import {
   u64ToHexLE,
   serializeMetadataHex,
   readTotalPledged,
-  readFundingGoal,
   readCampaignStatus,
   withTotalPledged,
-  withCampaignStatus,
   receiptTypeArgs,
 } from "@/lib/serialization";
+import { resolveLiveCampaignCell, sendFinalize, sendRelease, sendRefund, sendDestroy } from "@/lib/campaignActions";
 import { useDevnet } from "@/components/DevnetContext";
+import { useWalletLockHash } from "@/components/useWallet";
 import { useToast } from "@/components/Toast";
 import { SkeletonDetailPage } from "@/components/Skeleton";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
@@ -62,35 +62,6 @@ function isInputAlreadySpentError(error: unknown): boolean {
   }
   const msg = error instanceof Error ? error.message : String(error);
   return msg.includes("Unknown(OutPoint(") || msg.includes("Dead(OutPoint(") || msg.includes("PoolRejectedRBF");
-}
-
-/**
- * Resolve the campaign's live cell and its on-chain data.
- *
- * Since v1.2 every pledge consumes and re-creates the campaign cell, so the out point the
- * indexer last saw can already be dead. The type script (TypeID + pledge-lock code hash)
- * is fixed for the life of the campaign, so it is read from the last known out point —
- * historical transactions stay resolvable — and used to search for the live cell.
- */
-async function resolveLiveCampaignCell(client: any, campaignId: string) {
-  const [knownTxHash, knownIndex] = campaignId.split("_");
-  const knownTx = await client.getTransaction(knownTxHash);
-  const knownOutput = knownTx?.transaction?.outputs?.[parseInt(knownIndex)];
-  if (!knownOutput?.type) {
-    throw new Error("Campaign cell not found. It may have been destroyed.");
-  }
-  const typeScript = ccc.Script.from(knownOutput.type);
-
-  // Query the chain, not the client cache: the cache keeps returning a campaign cell this
-  // wallet created (by pledging) even after another pledge or the bot's finalization spent it
-  for await (const cell of client.findCellsOnChain(
-    { script: typeScript, scriptType: "type" as const, scriptSearchMode: "exact" as const, withData: true },
-    "asc",
-    1
-  )) {
-    return { cell, typeScript, typeScriptHash: typeScript.hash() };
-  }
-  throw new Error("Campaign is no longer live on chain");
 }
 
 /**
@@ -136,7 +107,6 @@ export default function CampaignDetailPage() {
   // Action state
   const [actionLoading, setActionLoading] = useState(false);
   const [actionTxHash, setActionTxHash] = useState<string | null>(null);
-  const [walletLockHash, setWalletLockHash] = useState<string | null>(null);
   const [reclaiming, setReclaiming] = useState(false);
 
   // UI state
@@ -145,25 +115,7 @@ export default function CampaignDetailPage() {
   const [pledgeSortMode, setPledgeSortMode] = useState<PledgeSortMode>("recent");
   const [txProgress, setTxProgress] = useState<"submitted" | "pending" | "confirmed" | null>(null);
 
-  // Get wallet lock hash when signer changes
-  useEffect(() => {
-    async function getWalletInfo() {
-      if (!signer) {
-        setWalletLockHash(null);
-        return;
-      }
-      try {
-        const address = await signer.getRecommendedAddress();
-        const client = signer.client;
-        const addressObj = await ccc.Address.fromString(address, client);
-        const lockHash = addressObj.script.hash();
-        setWalletLockHash(lockHash);
-      } catch {
-        setWalletLockHash(null);
-      }
-    }
-    getWalletInfo();
-  }, [signer]);
+  const walletLockHash = useWalletLockHash(signer);
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
@@ -449,61 +401,7 @@ export default function CampaignDetailPage() {
     setActionTxHash(null);
 
     try {
-      const client = signer.client;
-
-      // v1.2: the outcome is decided by the on-chain accumulator, not by the indexer's
-      // numbers, and the campaign type script rejects a status the total does not support.
-      // Read the live cell and edit only its status byte — re-serializing the data would
-      // risk a mismatch in the metadata tail, which the type script requires unchanged.
-      const { cell: campaignCell } = await resolveLiveCampaignCell(client, campaign.campaignId);
-      const campaignData = ccc.hexFrom(campaignCell.outputData);
-
-      const totalPledged = readTotalPledged(campaignData);
-      const fundingGoal = readFundingGoal(campaignData);
-      const newStatus = totalPledged >= fundingGoal ? CampaignStatus.Success : CampaignStatus.Failed;
-      const newCampaignData = withCampaignStatus(campaignData, newStatus);
-
-      const deadlineBlock = BigInt(campaign.deadlineBlock);
-
-      const tx = ccc.Transaction.from({
-        inputs: [
-          {
-            previousOutput: campaignCell.outPoint,
-            since: deadlineBlock,
-          },
-        ],
-        outputs: [
-          {
-            // Capacity is preserved exactly — the type script rejects a campaign cell that
-            // comes out of a transition worth less than it went in.
-            capacity: campaignCell.cellOutput.capacity,
-            lock: campaignCell.cellOutput.lock,
-            type: campaignCell.cellOutput.type,
-          },
-        ],
-        outputsData: [newCampaignData],
-        cellDeps: [
-          {
-            outPoint: {
-              txHash: CONTRACTS.campaign.txHash,
-              index: CONTRACTS.campaign.index,
-            },
-            depType: "code",
-          },
-          {
-            outPoint: {
-              txHash: CONTRACTS.campaignLock.txHash,
-              index: CONTRACTS.campaignLock.index,
-            },
-            depType: "code",
-          },
-        ],
-      });
-
-      tx.witnesses.push("0x");
-
-      await tx.completeFeeBy(signer, 2000);
-      const hash = await signer.sendTransaction(tx);
+      const hash = await sendFinalize(signer, campaign);
       setActionTxHash(hash);
       toast("success", "Campaign finalized! Redirecting...");
 
@@ -538,97 +436,9 @@ export default function CampaignDetailPage() {
     setActionTxHash(null);
 
     try {
-      const client = signer.client;
-
-      // Get creator's lock script from campaign
-      const creatorLockScript = campaign.creatorLockScript || {
-        codeHash: "",
-        hashType: "",
-        args: "",
-      };
-
       // Release the first live pledge. Work from pledges, not receipts: a backer may already
       // have reclaimed their receipt, and the pledge lock needs nothing from it.
-      const pledgeCell = pledges[0];
-
-      // Fetch actual pledge cell capacity from chain (includes base + pledge amount)
-      const pledgeTxData = await client.getTransaction(pledgeCell.txHash);
-      if (!pledgeTxData || !pledgeTxData.transaction) {
-        toast("error", "Could not fetch pledge transaction from chain");
-        return;
-      }
-      const pledgeOutput = pledgeTxData.transaction.outputs[pledgeCell.index]!;
-      const pledgeCapacity = BigInt(pledgeOutput.capacity);
-      const pledgeAmount = BigInt(pledgeCell.amount);
-
-      // The creator receives exactly the pledged amount; the cell's storage overhead goes back
-      // to the backer. The pledge cell only stores the backer's lock hash, so find the full
-      // lock among the pledge transaction's outputs (the receipt is always one of them).
-      const backerLockHash = ccc.hexFrom(ccc.bytesFrom(pledgeOutput.lock.args).slice(40, 72));
-      const backerLock = pledgeTxData.transaction.outputs
-        .map((o: { lock: ccc.Script }) => ccc.Script.from(o.lock))
-        .find((lock: ccc.Script) => lock.hash() === backerLockHash);
-      if (!backerLock) {
-        toast("error", "Could not find the backer's lock script for this pledge");
-        return;
-      }
-      const creatorLock = ccc.Script.from({
-        codeHash: creatorLockScript.codeHash || "",
-        hashType: (creatorLockScript.hashType || "type") as ccc.HashTypeLike,
-        args: creatorLockScript.args || "",
-      });
-      const releaseFee = BigInt(100000);
-      const releaseOutputs = creatorLock.eq(backerLock)
-        ? [{ capacity: pledgeCapacity - releaseFee, lock: creatorLock }]
-        : [
-            { capacity: pledgeAmount, lock: creatorLock },
-            { capacity: pledgeCapacity - pledgeAmount - releaseFee, lock: backerLock },
-          ];
-
-      // Get campaign cell outpoint for deps
-      const [campaignTxHash, campaignIndexStr] = campaign.campaignId.split("_");
-      const campaignCellDep = {
-        txHash: campaignTxHash,
-        index: parseInt(campaignIndexStr),
-      };
-
-      // Build permissionless release transaction
-      const tx = ccc.Transaction.from({
-        inputs: [
-          {
-            previousOutput: {
-              txHash: pledgeCell.txHash,
-              index: pledgeCell.index,
-            },
-            since: campaign.deadlineBlock,
-          },
-        ],
-        outputs: releaseOutputs,
-        outputsData: releaseOutputs.map(() => "0x"),
-        cellDeps: [
-          {
-            outPoint: campaignCellDep,
-            depType: "code",
-          },
-          {
-            outPoint: {
-              txHash: CONTRACTS.pledgeLock.txHash,
-              index: CONTRACTS.pledgeLock.index,
-            },
-            depType: "code",
-          },
-          {
-            outPoint: {
-              txHash: CONTRACTS.pledge.txHash,
-              index: CONTRACTS.pledge.index,
-            },
-            depType: "code",
-          },
-        ],
-      });
-
-      // The fee is already taken out of the pledge cell, so the triggering wallet adds no inputs
-      const hash = await signer.sendTransaction(tx);
+      const hash = await sendRelease(signer, campaign, pledges[0]);
       setActionTxHash(hash);
       toast("success", "Release triggered! Funds being sent to creator...");
 
@@ -657,57 +467,7 @@ export default function CampaignDetailPage() {
     setActionTxHash(null);
 
     try {
-      const client = signer.client;
-
-      // Refund the first live pledge to its backer. Anyone can trigger this: the pledge lock
-      // routes the funds to the backer's lock hash in its args, whoever signs.
-      const pledgeCell = pledges[0];
-      const pledgeTxData = await client.getTransaction(pledgeCell.txHash);
-      if (!pledgeTxData || !pledgeTxData.transaction) {
-        toast("error", "Could not fetch pledge transaction from chain");
-        return;
-      }
-      const pledgeOutput = pledgeTxData.transaction.outputs[pledgeCell.index]!;
-      const pledgeCapacity = BigInt(pledgeOutput.capacity);
-
-      // The pledge cell only stores the backer's lock hash; the full lock is among the
-      // outputs of the transaction that created it (the receipt is always one of them)
-      const backerLockHash = ccc.hexFrom(ccc.bytesFrom(pledgeOutput.lock.args).slice(40, 72));
-      const backerLock = pledgeTxData.transaction.outputs
-        .map((o: { lock: ccc.Script }) => ccc.Script.from(o.lock))
-        .find((lock: ccc.Script) => lock.hash() === backerLockHash);
-      if (!backerLock) {
-        toast("error", "Could not find the backer's lock script for this pledge");
-        return;
-      }
-
-      // The finalized campaign cell must be a cell dep: without it the pledge lock only
-      // allows a refund after the grace period
-      const { cell: campaignCell } = await resolveLiveCampaignCell(client, campaign.campaignId);
-
-      const tx = ccc.Transaction.from({
-        inputs: [
-          {
-            previousOutput: { txHash: pledgeCell.txHash, index: pledgeCell.index },
-            since: campaign.deadlineBlock,
-          },
-        ],
-        outputs: [{ capacity: pledgeCapacity - BigInt(100000), lock: backerLock }],
-        outputsData: ["0x"],
-        cellDeps: [
-          { outPoint: campaignCell.outPoint, depType: "code" },
-          {
-            outPoint: { txHash: CONTRACTS.pledgeLock.txHash, index: CONTRACTS.pledgeLock.index },
-            depType: "code",
-          },
-          {
-            outPoint: { txHash: CONTRACTS.pledge.txHash, index: CONTRACTS.pledge.index },
-            depType: "code",
-          },
-        ],
-      });
-
-      const hash = await signer.sendTransaction(tx);
+      const hash = await sendRefund(signer, campaign, pledges[0]);
       setActionTxHash(hash);
       toast("success", "Refund triggered! Funds being returned to the backer...");
 
@@ -817,52 +577,7 @@ export default function CampaignDetailPage() {
     setActionTxHash(null);
 
     try {
-      const address = await signer.getRecommendedAddress();
-      const client = signer.client;
-      const lockScript = (await ccc.Address.fromString(address, client)).script;
-
-      const { cell: campaignCell } = await resolveLiveCampaignCell(client, campaign.campaignId);
-
-      // The campaign-lock needs since >= deadline and the campaign type script needs
-      // since >= deadline + grace period, so one since satisfies both. The whole capacity
-      // goes back to the creator, less the fee, which the type script allows up to 1 CKB.
-      const tx = ccc.Transaction.from({
-        inputs: [
-          {
-            previousOutput: campaignCell.outPoint,
-            since: BigInt(campaign.deadlineBlock) + GRACE_PERIOD_BLOCKS,
-          },
-        ],
-        outputs: [
-          {
-            capacity: campaignCell.cellOutput.capacity,
-            lock: lockScript,
-            // No type script — plain CKB cell, capacity reclaimed
-          },
-        ],
-        outputsData: ["0x"],
-        cellDeps: [
-          {
-            outPoint: {
-              txHash: CONTRACTS.campaign.txHash,
-              index: CONTRACTS.campaign.index,
-            },
-            depType: "code",
-          },
-          {
-            outPoint: {
-              txHash: CONTRACTS.campaignLock.txHash,
-              index: CONTRACTS.campaignLock.index,
-            },
-            depType: "code",
-          },
-        ],
-      });
-
-      tx.witnesses.push("0x");
-
-      await tx.completeFeeChangeToOutput(signer, 0, 1000);
-      const hash = await signer.sendTransaction(tx);
+      const hash = await sendDestroy(signer, campaign);
       setActionTxHash(hash);
       toast("success", "Campaign destroyed! Redirecting...");
 

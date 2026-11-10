@@ -27,6 +27,7 @@ const LANDING_NAV = [
 const APP_NAV = [
   { href: "/app", label: "Campaigns" },
   { href: "/campaigns/new", label: "Create" },
+  { href: "/dashboard/campaigns", label: "My campaigns" },
 ];
 
 export function Header() {

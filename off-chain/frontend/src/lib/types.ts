@@ -31,6 +31,31 @@ export interface Campaign {
   backerCount?: number;  // Count of unique backers across pledges and receipts
 }
 
+/**
+ * What a creator can do next on one of their campaigns (indexer /wallet/:lockHash/campaigns)
+ */
+export interface CreatorActions {
+  /** Deadline reached and still Active: the campaign can be finalized */
+  finalize: boolean;
+  /** Finalized with pledge cells still live: they can be released (funded) or refunded (failed) */
+  distribute: "release" | "refund" | null;
+  /** Finalized, every pledge settled, grace period over: the cell can be destroyed */
+  destroy: boolean;
+  /** First block at which the cell can be destroyed (deadline + grace period) */
+  destroyableFromBlock: string;
+}
+
+/**
+ * A campaign as the creator dashboard sees it
+ */
+export interface WalletCampaign extends Campaign {
+  /** Pledge cells not yet released or refunded */
+  livePledgeCount: number;
+  /** Total held in those pledge cells (shannons) */
+  livePledgedAmount: string;
+  actions: CreatorActions;
+}
+
 export enum CampaignStatus {
   Active = 0,
   Success = 1,

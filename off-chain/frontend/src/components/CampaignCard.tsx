@@ -9,6 +9,7 @@ import {
   getEffectiveStatusColor,
   getFundingProgress,
   blocksToTimeEstimate,
+  canonicalCampaignId,
 } from "@/lib/utils";
 import { CellMeter, CellMeterTone } from "./CellMeter";
 import { LockName } from "./CellName";
@@ -21,11 +22,6 @@ interface CampaignCardProps {
 }
 
 const NO_NAMES = new Map<string, string | null>();
-
-/** The campaign's stable URL id: its creation out point, which never moves. */
-function canonicalCampaignId(campaign: Campaign): string {
-  return campaign.originalTxHash ? `${campaign.originalTxHash}_0` : campaign.campaignId;
-}
 
 /** Meter colour per effective status: amber while open, the outcome's colour once decided */
 function meterTone(effectiveStatus: string): CellMeterTone {

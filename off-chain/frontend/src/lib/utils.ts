@@ -1,4 +1,4 @@
-import { CampaignStatus, Pledge, PledgeDistributionStatus } from "./types";
+import { Campaign, CampaignStatus, Pledge, PledgeDistributionStatus } from "./types";
 import { PLEDGE_CELL_OVERHEAD, RECEIPT_CELL_CAPACITY, SECONDS_PER_BLOCK } from "./constants";
 
 /**
@@ -55,6 +55,11 @@ export function getStatusColor(status: CampaignStatus): string {
     default:
       return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
   }
+}
+
+/** The campaign's stable URL id: its creation out point, which never moves. */
+export function canonicalCampaignId(campaign: Campaign): string {
+  return campaign.originalTxHash ? `${campaign.originalTxHash}_0` : campaign.campaignId;
 }
 
 /**

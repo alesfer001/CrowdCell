@@ -1,4 +1,4 @@
-import { Campaign, IndexerStatus, Pledge, Receipt } from "./types";
+import { Campaign, IndexerStatus, Pledge, Receipt, WalletCampaign } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -27,6 +27,17 @@ export async function fetchCampaign(id: string): Promise<Campaign | null> {
   }
   if (!res.ok) {
     throw new Error(`Failed to fetch campaign: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+/**
+ * Fetch the campaigns a wallet created, with the actions open on each
+ */
+export async function fetchWalletCampaigns(lockHash: string): Promise<WalletCampaign[]> {
+  const res = await apiFetch(`${API_BASE}/wallet/${encodeURIComponent(lockHash)}/campaigns`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch your campaigns: ${res.statusText}`);
   }
   return res.json();
 }
