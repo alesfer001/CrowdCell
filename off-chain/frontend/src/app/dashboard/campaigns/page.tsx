@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { IndexerPhase, WalletCampaign } from "@/lib/types";
 import { fetchBlockNumber, fetchCampaign, fetchPledgesForCampaign, fetchWalletCampaigns } from "@/lib/api";
@@ -15,29 +15,29 @@ import {
   shannonsToCKB,
 } from "@/lib/utils";
 import { EXPLORER_URL } from "@/lib/constants";
-import { isWalletCancel, sendDestroy, sendFinalize, sendRefund, sendRelease } from "@/lib/campaignActions";
-import { CellMeter, CellMeterTone } from "@/components/CellMeter";
+import { sendDestroy, sendFinalize, sendRefund, sendRelease } from "@/lib/campaignActions";
+import { CellMeter } from "@/components/CellMeter";
+import { meterTone } from "@/components/CampaignCard";
 import { SkeletonCard } from "@/components/Skeleton";
 import { useActiveWallet } from "@/components/useWallet";
 import { useToast } from "@/components/Toast";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
 import {
+  ActionButton,
   CARD,
   DashboardHeader,
   EMPTY_STATE,
   PRIMARY_BUTTON,
-  REFRESH_ATTEMPTS,
-  REFRESH_INTERVAL_MS,
-  SECONDARY_BUTTON,
+  RowAction,
+  useRowActions,
+  WalletAddressError,
 } from "@/components/Dashboard";
 
 type ActionKind = "finalize" | "release" | "refund" | "destroy";
 
-/** Meter colour per effective status: amber while open, the outcome's colour once decided */
-function meterTone(effectiveStatus: string): CellMeterTone {
-  if (effectiveStatus === "success") return "ok";
-  if (effectiveStatus === "failed") return "bad";
-  return "fund";
+/** What changes on a row once the indexer has seen an action on it */
+function rowFingerprint(c: WalletCampaign | undefined): string {
+  return c ? `${c.campaignId}|${c.effectiveStatus}|${c.livePledgeCount}` : "gone";
 }
 
 /**
@@ -46,8 +46,14 @@ function meterTone(effectiveStatus: string): CellMeterTone {
  * campaign page.
  */
 export default function MyCampaignsPage() {
-  const { signer, lockHash, open, isDevnet } = useActiveWallet();
+  const { signer, lockHash, addressFailed, open, isDevnet } = useActiveWallet();
   const { toast } = useToast();
+  const { busy, lastTx, run } = useRowActions<ActionKind>(lockHash);
+  // The wallet the latest load is for, so a reply for a previous wallet is dropped
+  const lockHashRef = useRef(lockHash);
+  useEffect(() => {
+    lockHashRef.current = lockHash;
+  }, [lockHash]);
   const { phase: indexerPhase, elapsedSeconds, retry: retryIndexer } = useIndexerReady();
   const indexerReady = indexerPhase === IndexerPhase.Ready;
 
@@ -55,22 +61,24 @@ export default function MyCampaignsPage() {
   const [currentBlock, setCurrentBlock] = useState<bigint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  /** Campaign whose action is in flight, so its buttons can show progress */
-  const [busy, setBusy] = useState<{ id: string; kind: ActionKind } | null>(null);
-  const [lastTx, setLastTx] = useState<{ id: string; hash: string } | null>(null);
-
-  const load = useCallback(async (isRefresh = false) => {
-    if (!lockHash) return;
+  /** Load the wallet's campaigns; returns them, or null when the load failed or is stale */
+  const load = useCallback(async (isRefresh = false): Promise<WalletCampaign[] | null> => {
+    if (!lockHash) return null;
     if (!isRefresh) setLoading(true);
-    setError(null);
     try {
       const [mine, blockNum] = await Promise.all([fetchWalletCampaigns(lockHash), fetchBlockNumber()]);
+      if (lockHashRef.current !== lockHash) return null;
       // Newest first
       mine.sort((a, b) => Number(BigInt(b.createdAt) - BigInt(a.createdAt)));
       setCampaigns(mine);
       setCurrentBlock(blockNum);
+      setError(null);
+      return mine;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load your campaigns");
+      if (lockHashRef.current === lockHash) {
+        setError(err instanceof Error ? err.message : "Failed to load your campaigns");
+      }
+      return null;
     } finally {
       if (!isRefresh) setLoading(false);
     }
@@ -83,57 +91,49 @@ export default function MyCampaignsPage() {
     return () => clearInterval(interval);
   }, [indexerReady, lockHash, load]);
 
-  /** Reload a few times so the row picks up the transaction once the indexer has seen it */
-  async function refreshUntilIndexed() {
-    for (let i = 0; i < REFRESH_ATTEMPTS; i++) {
-      await new Promise((r) => setTimeout(r, REFRESH_INTERVAL_MS));
-      await load(true);
-    }
-  }
-
-  async function runAction(campaign: WalletCampaign, kind: ActionKind) {
+  function runAction(campaign: WalletCampaign, kind: ActionKind) {
     if (!signer) return;
-    setBusy({ id: canonicalCampaignId(campaign), kind });
-    setLastTx(null);
-    try {
-      // The out point the dashboard holds may be stale: since v1.2 every pledge moves the
-      // campaign cell. The indexer resolves the creation id to the live cell.
-      const live = (await fetchCampaign(canonicalCampaignId(campaign))) ?? campaign;
-      let hash: string;
-      if (kind === "finalize") {
-        hash = await sendFinalize(signer, live);
-      } else if (kind === "destroy") {
-        hash = await sendDestroy(signer, live);
-      } else {
-        const pledges = await fetchPledgesForCampaign(canonicalCampaignId(campaign));
-        if (pledges.length === 0) {
-          toast("info", "Every pledge is already settled");
-          await load(true);
-          return;
+    const id = canonicalCampaignId(campaign);
+    const before = rowFingerprint(campaign);
+    run({
+      id,
+      kind,
+      failMessage: `Failed to ${kind} the campaign`,
+      reloadAndCheck: async () => {
+        const list = await load(true);
+        return list !== null && rowFingerprint(list.find((c) => canonicalCampaignId(c) === id)) !== before;
+      },
+      send: async () => {
+        // The out point the dashboard holds may be stale: since v1.2 every pledge moves the
+        // campaign cell. The indexer resolves the creation id to the live cell.
+        const live = (await fetchCampaign(id)) ?? campaign;
+        let hash: string;
+        if (kind === "finalize") {
+          hash = await sendFinalize(signer, live);
+        } else if (kind === "destroy") {
+          hash = await sendDestroy(signer, live);
+        } else {
+          const pledges = await fetchPledgesForCampaign(id);
+          if (pledges.length === 0) {
+            toast("info", "Every pledge is already settled");
+            await load(true);
+            return null;
+          }
+          hash = kind === "release"
+            ? await sendRelease(signer, live, pledges[0])
+            : await sendRefund(signer, live, pledges[0]);
         }
-        hash = kind === "release"
-          ? await sendRelease(signer, live, pledges[0])
-          : await sendRefund(signer, live, pledges[0]);
-      }
-      setLastTx({ id: canonicalCampaignId(campaign), hash });
-      toast("success", {
-        finalize: "Campaign finalized",
-        release: "Pledge released to you",
-        refund: "Pledge refunded to its backer",
-        destroy: "Campaign cell destroyed, capacity returned",
-      }[kind]);
-      setBusy(null);
-      await refreshUntilIndexed();
-    } catch (err) {
-      console.error(`Failed to ${kind} campaign:`, err);
-      if (isWalletCancel(err)) {
-        toast("warning", "Transaction was cancelled");
-      } else {
-        toast("error", err instanceof Error ? err.message : `Failed to ${kind} the campaign`);
-      }
-    } finally {
-      setBusy(null);
-    }
+        return {
+          hash,
+          message: {
+            finalize: "Campaign finalized",
+            release: "Pledge released to you",
+            refund: "Pledge refunded to its backer",
+            destroy: "Campaign cell destroyed, capacity returned",
+          }[kind],
+        };
+      },
+    });
   }
 
   const showSkeletons = lockHash !== null && (indexerReady ? loading : indexerPhase !== IndexerPhase.Offline);
@@ -151,6 +151,8 @@ export default function MyCampaignsPage() {
             </Link>
           }
         />
+
+        {signer && addressFailed && <WalletAddressError onReconnect={open} />}
 
         {!signer && (
           <div className={EMPTY_STATE}>
@@ -174,7 +176,7 @@ export default function MyCampaignsPage() {
         )}
 
         {showContent && error && (
-          <div className="bg-bad-soft border border-bad/30 rounded-[14px] p-4">
+          <div className="bg-bad-soft border border-bad/30 rounded-[14px] p-4 mb-4">
             <p className="text-bad">{error}</p>
           </div>
         )}
@@ -188,14 +190,14 @@ export default function MyCampaignsPage() {
           </div>
         )}
 
-        {showContent && !error && campaigns.length > 0 && (
+        {showContent && campaigns.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {campaigns.map((c) => (
               <CampaignRow
                 key={canonicalCampaignId(c)}
                 campaign={c}
                 currentBlock={currentBlock}
-                busy={busy?.id === canonicalCampaignId(c) ? busy.kind : null}
+                busy={busy?.id === canonicalCampaignId(c) ? busy : null}
                 anyBusy={busy !== null}
                 txHash={lastTx?.id === canonicalCampaignId(c) ? lastTx.hash : null}
                 onAction={(kind) => runAction(c, kind)}
@@ -212,7 +214,7 @@ interface CampaignRowProps {
   campaign: WalletCampaign;
   currentBlock: bigint | null;
   /** The action in flight on this campaign, if any */
-  busy: ActionKind | null;
+  busy: RowAction<ActionKind> | null;
   /** An action is in flight on some campaign; only one runs at a time */
   anyBusy: boolean;
   /** Hash of the last transaction sent from this row */
@@ -355,31 +357,5 @@ function NextStep({
       {blocksToDestroy !== null && blocksToDestroy > 0n ? ` (${blocksToTimeEstimate(blocksToDestroy)})` : ""}, which
       leaves backers time to reclaim their receipt deposits.
     </p>
-  );
-}
-
-function ActionButton({
-  kind,
-  label,
-  busy,
-  disabled,
-  onAction,
-  primary = false,
-}: {
-  kind: ActionKind;
-  label: string;
-  busy: ActionKind | null;
-  disabled: boolean;
-  onAction: (kind: ActionKind) => void;
-  primary?: boolean;
-}) {
-  return (
-    <button
-      onClick={() => onAction(kind)}
-      disabled={disabled}
-      className={`${primary ? PRIMARY_BUTTON : SECONDARY_BUTTON} self-start`}
-    >
-      {busy === kind ? "Waiting for wallet…" : label}
-    </button>
   );
 }

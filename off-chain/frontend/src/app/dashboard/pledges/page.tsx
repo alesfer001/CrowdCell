@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { IndexerPhase, PledgeOutcome, WalletPledgePosition } from "@/lib/types";
 import { fetchBlockNumber, fetchCampaign, fetchWalletPledges } from "@/lib/api";
@@ -13,20 +13,20 @@ import {
   shannonsToCKB,
 } from "@/lib/utils";
 import { EXPLORER_URL } from "@/lib/constants";
-import { isWalletCancel, sendFinalize, sendReclaimReceipts, sendRefund } from "@/lib/campaignActions";
+import { sendFinalize, sendReclaimReceipts, sendRefund } from "@/lib/campaignActions";
 import { CellMeter, CellMeterTone } from "@/components/CellMeter";
 import { SkeletonCard } from "@/components/Skeleton";
 import { useActiveWallet } from "@/components/useWallet";
-import { useToast } from "@/components/Toast";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
 import {
+  ActionButton,
   CARD,
   DashboardHeader,
   EMPTY_STATE,
   PRIMARY_BUTTON,
-  REFRESH_ATTEMPTS,
-  REFRESH_INTERVAL_MS,
-  SECONDARY_BUTTON,
+  RowAction,
+  useRowActions,
+  WalletAddressError,
 } from "@/components/Dashboard";
 
 type ActionKind = "finalize" | "refund" | "reclaim";
@@ -53,6 +53,11 @@ const OUTCOME_ORDER: Record<PledgeOutcome, number> = {
   closed: 5,
 };
 
+/** What changes on a card once the indexer has seen an action on it */
+function positionFingerprint(p: WalletPledgePosition | undefined): string {
+  return p ? `${p.outcome}|${p.livePledges.length}|${p.liveReceipts.length}` : "gone";
+}
+
 function meterTone(outcome: PledgeOutcome): CellMeterTone {
   if (outcome === "released" || outcome === "release_pending") return "ok";
   if (outcome === "refunded" || outcome === "refund_pending") return "bad";
@@ -65,8 +70,13 @@ function meterTone(outcome: PledgeOutcome): CellMeterTone {
  * amount pledged, so settled campaigns stay listed.
  */
 export default function MyPledgesPage() {
-  const { signer, lockHash, open, isDevnet } = useActiveWallet();
-  const { toast } = useToast();
+  const { signer, lockHash, addressFailed, open, isDevnet } = useActiveWallet();
+  const { busy, lastTx, run } = useRowActions<ActionKind>(lockHash);
+  // The wallet the latest load is for, so a reply for a previous wallet is dropped
+  const lockHashRef = useRef(lockHash);
+  useEffect(() => {
+    lockHashRef.current = lockHash;
+  }, [lockHash]);
   const { phase: indexerPhase, elapsedSeconds, retry: retryIndexer } = useIndexerReady();
   const indexerReady = indexerPhase === IndexerPhase.Ready;
 
@@ -74,23 +84,26 @@ export default function MyPledgesPage() {
   const [currentBlock, setCurrentBlock] = useState<bigint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<{ id: string; kind: ActionKind } | null>(null);
-  const [lastTx, setLastTx] = useState<{ id: string; hash: string } | null>(null);
-
-  const load = useCallback(async (isRefresh = false) => {
-    if (!lockHash) return;
+  /** Load the wallet's positions; returns them, or null when the load failed or is stale */
+  const load = useCallback(async (isRefresh = false): Promise<WalletPledgePosition[] | null> => {
+    if (!lockHash) return null;
     if (!isRefresh) setLoading(true);
-    setError(null);
     try {
       const [mine, blockNum] = await Promise.all([fetchWalletPledges(lockHash), fetchBlockNumber()]);
+      if (lockHashRef.current !== lockHash) return null;
       mine.sort((a, b) =>
         OUTCOME_ORDER[a.outcome] - OUTCOME_ORDER[b.outcome]
         || Number(BigInt(b.campaign?.createdAt ?? "0") - BigInt(a.campaign?.createdAt ?? "0"))
       );
       setPositions(mine);
       setCurrentBlock(blockNum);
+      setError(null);
+      return mine;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load your pledges");
+      if (lockHashRef.current === lockHash) {
+        setError(err instanceof Error ? err.message : "Failed to load your pledges");
+      }
+      return null;
     } finally {
       if (!isRefresh) setLoading(false);
     }
@@ -103,47 +116,32 @@ export default function MyPledgesPage() {
     return () => clearInterval(interval);
   }, [indexerReady, lockHash, load]);
 
-  async function refreshUntilIndexed() {
-    for (let i = 0; i < REFRESH_ATTEMPTS; i++) {
-      await new Promise((r) => setTimeout(r, REFRESH_INTERVAL_MS));
-      await load(true);
-    }
-  }
-
-  async function runAction(position: WalletPledgePosition, kind: ActionKind) {
-    if (!signer || !position.campaign) return;
-    setBusy({ id: position.linkage, kind });
-    setLastTx(null);
-    try {
-      // Resolve the live campaign: its out point moves with every pledge
-      const live = (await fetchCampaign(canonicalCampaignId(position.campaign))) ?? position.campaign;
-      let hash: string;
-      let done: string;
-      if (kind === "finalize") {
-        hash = await sendFinalize(signer, live);
-        done = "Campaign finalized";
-      } else if (kind === "refund") {
-        hash = await sendRefund(signer, live, position.livePledges[0]);
-        done = "Refund sent to your wallet";
-      } else {
+  function runAction(position: WalletPledgePosition, kind: ActionKind) {
+    const campaign = position.campaign;
+    if (!signer || !campaign) return;
+    const id = position.linkage;
+    const before = positionFingerprint(position);
+    run({
+      id,
+      kind,
+      failMessage: `Failed to ${kind}`,
+      reloadAndCheck: async () => {
+        const list = await load(true);
+        return list !== null && positionFingerprint(list.find((p) => p.linkage === id)) !== before;
+      },
+      send: async () => {
+        // Resolve the live campaign: its out point moves with every pledge
+        const live = (await fetchCampaign(canonicalCampaignId(campaign))) ?? campaign;
+        if (kind === "finalize") {
+          return { hash: await sendFinalize(signer, live), message: "Campaign finalized" };
+        }
+        if (kind === "refund") {
+          return { hash: await sendRefund(signer, live, position.livePledges[0]), message: "Refund sent to your wallet" };
+        }
         const result = await sendReclaimReceipts(signer, live, position.liveReceipts);
-        hash = result.hash;
-        done = `Reclaiming ${shannonsToCKB(result.total)} CKB in deposits`;
-      }
-      setLastTx({ id: position.linkage, hash });
-      toast("success", done);
-      setBusy(null);
-      await refreshUntilIndexed();
-    } catch (err) {
-      console.error(`Failed to ${kind}:`, err);
-      if (isWalletCancel(err)) {
-        toast("warning", "Transaction was cancelled");
-      } else {
-        toast("error", err instanceof Error ? err.message : `Failed to ${kind}`);
-      }
-    } finally {
-      setBusy(null);
-    }
+        return { hash: result.hash, message: `Reclaiming ${shannonsToCKB(result.total)} CKB in deposits` };
+      },
+    });
   }
 
   const showSkeletons = lockHash !== null && (indexerReady ? loading : indexerPhase !== IndexerPhase.Offline);
@@ -162,6 +160,8 @@ export default function MyPledgesPage() {
             </Link>
           }
         />
+
+        {signer && addressFailed && <WalletAddressError onReconnect={open} />}
 
         {!signer && (
           <div className={EMPTY_STATE}>
@@ -185,7 +185,7 @@ export default function MyPledgesPage() {
         )}
 
         {showContent && error && (
-          <div className="bg-bad-soft border border-bad/30 rounded-[14px] p-4">
+          <div className="bg-bad-soft border border-bad/30 rounded-[14px] p-4 mb-4">
             <p className="text-bad">{error}</p>
           </div>
         )}
@@ -199,7 +199,7 @@ export default function MyPledgesPage() {
           </div>
         )}
 
-        {showContent && !error && positions.length > 0 && (
+        {showContent && positions.length > 0 && (
           <>
             {reclaimable > 0n && (
               <p className="mb-4 text-sm text-ink-2">
@@ -213,7 +213,7 @@ export default function MyPledgesPage() {
                   key={p.linkage}
                   position={p}
                   currentBlock={currentBlock}
-                  busy={busy?.id === p.linkage ? busy.kind : null}
+                  busy={busy?.id === p.linkage ? busy : null}
                   anyBusy={busy !== null}
                   txHash={lastTx?.id === p.linkage ? lastTx.hash : null}
                   onAction={(kind) => runAction(p, kind)}
@@ -230,7 +230,8 @@ export default function MyPledgesPage() {
 interface PledgeCardProps {
   position: WalletPledgePosition;
   currentBlock: bigint | null;
-  busy: ActionKind | null;
+  /** The action in flight on this card, if any */
+  busy: RowAction<ActionKind> | null;
   anyBusy: boolean;
   txHash: string | null;
   onAction: (kind: ActionKind) => void;
@@ -379,30 +380,4 @@ function NextStep({
         </p>
       );
   }
-}
-
-function ActionButton({
-  kind,
-  label,
-  busy,
-  disabled,
-  onAction,
-  primary = false,
-}: {
-  kind: ActionKind;
-  label: string;
-  busy: ActionKind | null;
-  disabled: boolean;
-  onAction: (kind: ActionKind) => void;
-  primary?: boolean;
-}) {
-  return (
-    <button
-      onClick={() => onAction(kind)}
-      disabled={disabled}
-      className={`${primary ? PRIMARY_BUTTON : SECONDARY_BUTTON} self-start`}
-    >
-      {busy === kind ? "Waiting for wallet…" : label}
-    </button>
-  );
 }

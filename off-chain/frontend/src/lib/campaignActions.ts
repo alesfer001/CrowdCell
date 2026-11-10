@@ -19,6 +19,23 @@ export function isWalletCancel(err: unknown): boolean {
 }
 
 /**
+ * Did a transaction fail because an input it spends is already spent or pending?
+ * Since v1.2 every pledge consumes the campaign cell, so two pledges at once race for it, and
+ * a dashboard acting on a stale list can spend a cell that is already gone.
+ * While the winner is still in the pool the node rejects the loser as a failed RBF (either
+ * "fee too low to replace" or "contains unconfirmed inputs"); once the winner commits, the
+ * spent cell resolves as unknown. The unknown case also covers JoyID's stale wallet cells
+ * (Phase 17.7), which a rebuild fixes the same way.
+ */
+export function isInputAlreadySpentError(error: unknown): boolean {
+  if (error instanceof ccc.ErrorClientResolveUnknown || error instanceof ccc.ErrorClientRBFRejected) {
+    return true;
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.includes("Unknown(OutPoint(") || msg.includes("Dead(OutPoint(") || msg.includes("PoolRejectedRBF");
+}
+
+/**
  * Resolve the campaign's live cell and its on-chain data.
  *
  * Since v1.2 every pledge consumes and re-creates the campaign cell, so the out point the
@@ -130,12 +147,19 @@ export async function sendRelease(signer: ccc.Signer, campaign: Campaign, pledge
 
   // The creator receives exactly the pledged amount; the cell's storage overhead goes back
   // to the backer.
-  const creatorLockScript = campaign.creatorLockScript || { codeHash: "", hashType: "", args: "" };
+  // The pledge lock checks the creator's lock on-chain; checking it here too turns a missing or
+  // wrong lock from the indexer into a clear message instead of a failed transaction.
+  if (!campaign.creatorLockScript) {
+    throw new Error("The creator's lock script isn't known for this campaign, so it can't be released from here");
+  }
   const creatorLock = ccc.Script.from({
-    codeHash: creatorLockScript.codeHash || "",
-    hashType: (creatorLockScript.hashType || "type") as ccc.HashTypeLike,
-    args: creatorLockScript.args || "",
+    codeHash: campaign.creatorLockScript.codeHash,
+    hashType: campaign.creatorLockScript.hashType as ccc.HashTypeLike,
+    args: campaign.creatorLockScript.args,
   });
+  if (creatorLock.hash().toLowerCase() !== campaign.creator.toLowerCase()) {
+    throw new Error("The creator's lock script doesn't match the campaign's creator");
+  }
   const outputs = creatorLock.eq(backerLock)
     ? [{ capacity: pledgeCapacity - SETTLE_FEE, lock: creatorLock }]
     : [

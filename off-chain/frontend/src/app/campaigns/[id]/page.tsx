@@ -32,7 +32,7 @@ import {
   withTotalPledged,
   receiptTypeArgs,
 } from "@/lib/serialization";
-import { resolveLiveCampaignCell, sendFinalize, sendRelease, sendRefund, sendDestroy, sendReclaimReceipts } from "@/lib/campaignActions";
+import { isInputAlreadySpentError, isWalletCancel, resolveLiveCampaignCell, sendFinalize, sendRelease, sendRefund, sendDestroy, sendReclaimReceipts } from "@/lib/campaignActions";
 import { useDevnet } from "@/components/DevnetContext";
 import { useWalletLockHash } from "@/components/useWallet";
 import { useToast } from "@/components/Toast";
@@ -47,22 +47,6 @@ const PLEDGE_ATTEMPTS = 3;
 
 /** How long to wait for the winning pledge to commit before rebuilding anyway */
 const CAMPAIGN_CELL_MOVE_TIMEOUT_MS = 30000;
-
-/**
- * Did the pledge fail because an input it spends is already spent or pending?
- * Since v1.2 every pledge consumes the campaign cell, so two pledges at once race for it.
- * While the winner is still in the pool the node rejects the loser as a failed RBF (either
- * "fee too low to replace" or "contains unconfirmed inputs"); once the winner commits, the
- * spent cell resolves as unknown. The unknown case also covers JoyID's stale wallet cells
- * (Phase 17.7), which a rebuild fixes the same way.
- */
-function isInputAlreadySpentError(error: unknown): boolean {
-  if (error instanceof ccc.ErrorClientResolveUnknown || error instanceof ccc.ErrorClientRBFRejected) {
-    return true;
-  }
-  const msg = error instanceof Error ? error.message : String(error);
-  return msg.includes("Unknown(OutPoint(") || msg.includes("Dead(OutPoint(") || msg.includes("PoolRejectedRBF");
-}
 
 /**
  * Wait until the campaign cell has moved past a spent out point, so a rebuilt pledge
@@ -384,7 +368,7 @@ export default function CampaignDetailPage() {
     } catch (err) {
       console.error("Failed to create pledge:", err);
       const msg = err instanceof Error ? err.message : "Failed to create pledge";
-      if (msg.includes("rejected") || msg.includes("disconnected")) {
+      if (isWalletCancel(err)) {
         toast("warning", "Transaction was cancelled");
       } else {
         setPledgeError(msg);
@@ -420,7 +404,7 @@ export default function CampaignDetailPage() {
     } catch (err) {
       console.error("Failed to finalize campaign:", err);
       const msg = err instanceof Error ? err.message : "Failed to finalize campaign";
-      if (msg.includes("rejected") || msg.includes("disconnected")) {
+      if (isWalletCancel(err)) {
         toast("warning", "Transaction was cancelled");
       } else {
         toast("error", msg);
@@ -451,7 +435,7 @@ export default function CampaignDetailPage() {
     } catch (err) {
       console.error("Failed to trigger release:", err);
       const msg = err instanceof Error ? err.message : "Failed to trigger release";
-      if (msg.includes("rejected") || msg.includes("disconnected")) {
+      if (isWalletCancel(err)) {
         toast("warning", "Transaction was cancelled");
       } else {
         toast("error", msg);
@@ -479,7 +463,7 @@ export default function CampaignDetailPage() {
     } catch (err) {
       console.error("Failed to trigger refund:", err);
       const msg = err instanceof Error ? err.message : "Failed to trigger refund";
-      if (msg.includes("rejected") || msg.includes("disconnected")) {
+      if (isWalletCancel(err)) {
         toast("warning", "Transaction was cancelled");
       } else {
         toast("error", msg);
@@ -508,7 +492,7 @@ export default function CampaignDetailPage() {
     } catch (err) {
       console.error("Failed to reclaim receipts:", err);
       const msg = err instanceof Error ? err.message : "Failed to reclaim deposits";
-      if (msg.includes("rejected") || msg.includes("disconnected")) {
+      if (isWalletCancel(err)) {
         toast("warning", "Transaction was cancelled");
       } else {
         toast("error", msg);
@@ -538,7 +522,7 @@ export default function CampaignDetailPage() {
     } catch (err) {
       console.error("Failed to destroy campaign:", err);
       const msg = err instanceof Error ? err.message : "Failed to destroy campaign";
-      if (msg.includes("rejected") || msg.includes("disconnected")) {
+      if (isWalletCancel(err)) {
         toast("warning", "Transaction was cancelled");
       } else {
         toast("error", msg);

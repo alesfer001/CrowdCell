@@ -137,6 +137,7 @@ export class CampaignIndexer {
   private db: Database;
   private bot: FinalizationBot | null = null;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
+  private pollInFlight = false;
   private campaignCodeHash: string = "";
   private pledgeCodeHash: string = "";
   private receiptCodeHash: string = "";
@@ -492,6 +493,9 @@ export class CampaignIndexer {
     }
 
     this.pollingTimer = setInterval(async () => {
+      // A slow cycle (RPC latency, bot transactions) must not overlap the next one
+      if (this.pollInFlight) return;
+      this.pollInFlight = true;
       try {
         // 1. Index all campaigns/pledges from CKB
         await this.indexAll(
@@ -509,6 +513,8 @@ export class CampaignIndexer {
         }
       } catch (error) {
         console.error("Polling cycle error:", error);
+      } finally {
+        this.pollInFlight = false;
       }
     }, intervalMs);
 
@@ -789,6 +795,10 @@ export class CampaignIndexer {
         const tx = (await this.client.getTransaction(entry.txHash))?.transaction;
         // Not marked as seen, so a failed lookup is retried on the next poll
         if (!tx) continue;
+        // Re-check after the await: another scan may have recorded this output meanwhile,
+        // and a second record would double the backer's contributed amount
+        if (this.seenReceiptOutputs.has(key)) continue;
+        this.seenReceiptOutputs.add(key);
 
         const receipt = parseReceiptData(tx.outputsData[Number(entry.cellIndex)]);
         const pledgeIndex = tx.outputs.findIndex((o) => o.type?.codeHash === pledgeCodeHash);
@@ -806,7 +816,6 @@ export class CampaignIndexer {
             blockNumber: BigInt(entry.blockNumber),
           });
         }
-        this.seenReceiptOutputs.add(key);
       }
     } catch (error) {
       // Keep whatever history was gathered; live cells still count in the meantime

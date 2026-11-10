@@ -5,24 +5,26 @@ import { ccc } from "@ckb-ccc/connector-react";
 import { useDevnet } from "./DevnetContext";
 
 /**
- * Lock hash of a signer's recommended address, or null while there is no signer.
+ * Lock hash of a signer's recommended address, and whether reading it failed (an expired
+ * wallet session, say). The lock hash is null while there is no signer or when it failed.
  */
-export function useWalletLockHash(signer: ccc.Signer | undefined | null): string | null {
-  const [lockHash, setLockHash] = useState<string | null>(null);
+export function useWalletLockHashState(signer: ccc.Signer | undefined | null): { lockHash: string | null; failed: boolean } {
+  const [state, setState] = useState<{ lockHash: string | null; failed: boolean }>({ lockHash: null, failed: false });
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       if (!signer) {
-        setLockHash(null);
+        setState({ lockHash: null, failed: false });
         return;
       }
       try {
         const address = await signer.getRecommendedAddress();
         const addressObj = await ccc.Address.fromString(address, signer.client);
-        if (!cancelled) setLockHash(addressObj.script.hash());
-      } catch {
-        if (!cancelled) setLockHash(null);
+        if (!cancelled) setState({ lockHash: addressObj.script.hash(), failed: false });
+      } catch (err) {
+        console.error("Could not read the wallet's address:", err);
+        if (!cancelled) setState({ lockHash: null, failed: true });
       }
     }
     load();
@@ -31,7 +33,14 @@ export function useWalletLockHash(signer: ccc.Signer | undefined | null): string
     };
   }, [signer]);
 
-  return lockHash;
+  return state;
+}
+
+/**
+ * Lock hash of a signer's recommended address, or null while there is no signer.
+ */
+export function useWalletLockHash(signer: ccc.Signer | undefined | null): string | null {
+  return useWalletLockHashState(signer).lockHash;
 }
 
 /**
@@ -42,6 +51,6 @@ export function useActiveWallet() {
   const walletSigner = ccc.useSigner();
   const { isDevnet, devnetSigner } = useDevnet();
   const signer = isDevnet ? devnetSigner : walletSigner;
-  const lockHash = useWalletLockHash(signer);
-  return { signer, lockHash, open, isDevnet };
+  const { lockHash, failed: addressFailed } = useWalletLockHashState(signer);
+  return { signer, lockHash, addressFailed, open, isDevnet };
 }

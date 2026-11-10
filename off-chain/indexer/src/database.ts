@@ -219,16 +219,16 @@ export class Database {
 
   getPledgesForCampaign(campaignTxHash: string): DBPledge[] {
     const normalizedHash = campaignTxHash.toLowerCase();
-    return (this.db.prepare("SELECT * FROM pledges").all() as DBPledge[]).filter(
-      (p) => p.campaign_id.toLowerCase() === normalizedHash
-    );
+    return this.db
+      .prepare("SELECT * FROM pledges WHERE lower(campaign_id) = ?")
+      .all(normalizedHash) as DBPledge[];
   }
 
   getPledgesForBacker(lockHash: string): DBPledge[] {
     const normalizedHash = lockHash.toLowerCase();
-    return (this.db.prepare("SELECT * FROM pledges").all() as DBPledge[]).filter(
-      (p) => p.backer_lock_hash.toLowerCase() === normalizedHash
-    );
+    return this.db
+      .prepare("SELECT * FROM pledges WHERE lower(backer_lock_hash) = ?")
+      .all(normalizedHash) as DBPledge[];
   }
 
   getAllPledges(): DBPledge[] {
@@ -247,16 +247,16 @@ export class Database {
     const txHashOnly = normalizedId.includes("_")
       ? normalizedId.split("_")[0]
       : normalizedId;
-    return (this.db.prepare("SELECT * FROM receipts").all() as DBReceipt[]).filter(
-      (r) => r.campaign_id.toLowerCase() === normalizedId || r.campaign_id.toLowerCase() === txHashOnly
-    );
+    return this.db
+      .prepare("SELECT * FROM receipts WHERE lower(campaign_id) IN (?, ?)")
+      .all(normalizedId, txHashOnly) as DBReceipt[];
   }
 
   getReceiptsForBacker(lockHash: string): DBReceipt[] {
     const normalizedHash = lockHash.toLowerCase();
-    return (this.db.prepare("SELECT * FROM receipts").all() as DBReceipt[]).filter(
-      (r) => r.backer_lock_hash.toLowerCase() === normalizedHash
-    );
+    return this.db
+      .prepare("SELECT * FROM receipts WHERE lower(backer_lock_hash) = ?")
+      .all(normalizedHash) as DBReceipt[];
   }
 
   /**

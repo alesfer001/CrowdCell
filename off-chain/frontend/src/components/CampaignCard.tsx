@@ -25,7 +25,7 @@ interface CampaignCardProps {
 const NO_NAMES = new Map<string, string | null>();
 
 /** Meter colour per effective status: amber while open, the outcome's colour once decided */
-function meterTone(effectiveStatus: string): CellMeterTone {
+export function meterTone(effectiveStatus: string): CellMeterTone {
   if (effectiveStatus === "success") return "ok";
   if (effectiveStatus === "failed") return "bad";
   return "fund";
