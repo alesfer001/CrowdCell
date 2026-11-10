@@ -10,10 +10,16 @@ import { useIndexerReady, IndexerStatusBadge, IndexerWaitNotice } from "@/compon
 import Link from "next/link";
 import { NETWORK } from "@/lib/constants";
 import { CAMPAIGN_CATEGORIES } from "@/lib/categories";
+import { Select } from "@/components/Select";
 
 const FILTER_TABS = ["All", "Active", "Funded", "Unsuccessful", "Ended"];
 
 const EMPTY_STATE = "text-center py-12 border border-dashed border-line rounded-[14px] text-ink-2";
+
+const CATEGORY_FILTER_OPTIONS = [
+  { value: "", label: "All categories" },
+  ...CAMPAIGN_CATEGORIES.map((c) => ({ value: c.slug, label: c.label })),
+];
 
 /** Wait this long after the last keystroke before searching */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -179,28 +185,13 @@ export default function CampaignsApp() {
                 aria-label="Search campaigns"
                 className={`${FIELD} flex-1 min-w-[200px]`}
               />
-              <div className="relative">
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  aria-label="Category"
-                  className={`${FIELD} appearance-none pl-3.5 pr-10 min-w-[180px] cursor-pointer`}
-                >
-                  <option value="">All categories</option>
-                  {CAMPAIGN_CATEGORIES.map((c) => (
-                    <option key={c.slug} value={c.slug}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-                <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-3"
-              >
-                <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              </div>
+              <Select
+                value={category}
+                onChange={setCategory}
+                options={CATEGORY_FILTER_OPTIONS}
+                ariaLabel="Category"
+                className="w-[190px]"
+              />
             </div>
           )}
 

@@ -11,6 +11,7 @@ import { useToast } from "@/components/Toast";
 import { fetchBlockNumber, fetchCampaign } from "@/lib/api";
 import { IndexerPhase } from "@/lib/types";
 import { CAMPAIGN_CATEGORIES } from "@/lib/categories";
+import { Select } from "@/components/Select";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
 
 /** The browser's time zone; null during the server render, which cannot know it */
@@ -21,6 +22,8 @@ function useTimeZone(): string | null {
     () => null
   );
 }
+
+const CATEGORY_OPTIONS = CAMPAIGN_CATEGORIES.map((c) => ({ value: c.slug, label: c.label }));
 
 const MIN_DEADLINE_LABEL = `${MIN_DEADLINE_HOURS} hour${MIN_DEADLINE_HOURS !== 1 ? "s" : ""}`;
 
@@ -367,35 +370,19 @@ export default function CreateCampaignPage() {
           <label htmlFor="category" className="block text-sm font-medium mb-2">
             Category <span className="text-red-500">*</span>
           </label>
-          <div className="relative">
-          <select
+          <Select
             id="category"
             value={category}
-            onChange={(e) => {
-              setCategory(e.target.value);
+            onChange={(v) => {
+              setCategory(v);
               if (categoryError) setCategoryError(null);
             }}
             onBlur={validateCategory}
-            className={`w-full appearance-none pl-4 pr-10 py-2 border rounded-lg bg-surface-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-              categoryError ? "border-red-400 dark:border-red-600" : "border-line"
-            }`}
+            options={CATEGORY_OPTIONS}
+            placeholder="Choose a category"
             disabled={loading}
-          >
-            <option value="">Choose a category</option>
-            {CAMPAIGN_CATEGORIES.map((c) => (
-              <option key={c.slug} value={c.slug}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-3"
-          >
-            <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          </div>
+            invalid={categoryError !== null}
+          />
           <div className="mt-1">
             {categoryError ? (
               <p className="text-sm text-red-600 dark:text-red-400">{categoryError}</p>
