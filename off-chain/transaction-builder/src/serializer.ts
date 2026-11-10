@@ -250,6 +250,24 @@ export function serializeCampaignTypeArgs(typeId: string, pledgeLockCodeHash: st
 }
 
 /**
+ * Serialize receipt type script args
+ * Layout (64 bytes):
+ * - pledge_code_hash: [u8; 32]      (bytes 0-31)  — the pledge type a receipt pairs with
+ * - pledge_lock_code_hash: [u8; 32] (bytes 32-63) — lets the receipt type script recognise
+ *   its own pledge cell when the receipt is destroyed alongside one
+ */
+export function serializeReceiptTypeArgs(pledgeCodeHash: string, pledgeLockCodeHash: string): string {
+  const pledgeHash = pledgeCodeHash.startsWith("0x") ? pledgeCodeHash.slice(2) : pledgeCodeHash;
+  const lockHash = pledgeLockCodeHash.startsWith("0x")
+    ? pledgeLockCodeHash.slice(2)
+    : pledgeLockCodeHash;
+  if (!/^[0-9a-fA-F]{64}$/.test(pledgeHash) || !/^[0-9a-fA-F]{64}$/.test(lockHash)) {
+    throw new Error("Receipt type args: both pledge and pledge-lock code hashes must be 32 bytes of hex");
+  }
+  return "0x" + pledgeHash + lockHash;
+}
+
+/**
  * Read `total_pledged` (bytes 48-55, LE) out of raw campaign cell data.
  */
 export function readTotalPledged(campaignDataHex: string): bigint {

@@ -32,75 +32,52 @@ interface ContractsConfig {
   receipt: ContractInfo;
 }
 
-// Code hashes are deterministic (blake2b of binary) — same across all networks.
-// Only txHash differs per deployment.
-const CAMPAIGN_CODE_HASH =
-  process.env.NEXT_PUBLIC_CAMPAIGN_CODE_HASH ||
-  "0xb71c1c0bc80ddc5a16ef041f2adf1f9a9339b56ecd63c135607e7e5ebb6ea3fc";
-const PLEDGE_CODE_HASH =
-  process.env.NEXT_PUBLIC_PLEDGE_CODE_HASH ||
-  "0x423442d38b9e1fdfe68d0e878c4003317fe85408e202fd7de776205d289bc924";
-const PLEDGE_LOCK_CODE_HASH =
-  process.env.NEXT_PUBLIC_PLEDGE_LOCK_CODE_HASH ||
-  "0x3bb066cda4600d9709c195f28fb11eca22367d590a6139c5fc3791932df66066";
-const CAMPAIGN_LOCK_CODE_HASH =
-  process.env.NEXT_PUBLIC_CAMPAIGN_LOCK_CODE_HASH ||
-  "0x0000000000000000000000000000000000000000000000000000000000000000";
-const RECEIPT_CODE_HASH =
-  process.env.NEXT_PUBLIC_RECEIPT_CODE_HASH ||
-  "0x67ca84f10c9bf7ecbed480ebedb0f6e380cc6c11825f2f77683b72ffbcaa352f";
+// Code hashes change with every contract redeploy, so a default here goes stale without anyone
+// noticing. They come from the NEXT_PUBLIC_* env vars printed by the deploy script; unset means
+// zero, which fails on the first transaction rather than building against an old contract.
+const ZERO_HASH = "0x0000000000000000000000000000000000000000000000000000000000000000";
+const CAMPAIGN_CODE_HASH = process.env.NEXT_PUBLIC_CAMPAIGN_CODE_HASH || ZERO_HASH;
+const PLEDGE_CODE_HASH = process.env.NEXT_PUBLIC_PLEDGE_CODE_HASH || ZERO_HASH;
+const PLEDGE_LOCK_CODE_HASH = process.env.NEXT_PUBLIC_PLEDGE_LOCK_CODE_HASH || ZERO_HASH;
+const CAMPAIGN_LOCK_CODE_HASH = process.env.NEXT_PUBLIC_CAMPAIGN_LOCK_CODE_HASH || ZERO_HASH;
+const RECEIPT_CODE_HASH = process.env.NEXT_PUBLIC_RECEIPT_CODE_HASH || ZERO_HASH;
 
-function buildNetworkContracts(network: NetworkType): ContractsConfig {
-  const zero = "0x0000000000000000000000000000000000000000000000000000000000000000";
-  const devnetDefaults: Record<string, string> = {
-    campaign: "0x8d501828096d4b70a2f032ee04672cf5a75f8771dd1fb2ea23de0ef1519d05d6",
-    pledge: "0x304be042daf897898dcf1851e12ecabaa0400f677f0135fe9ec6c727fdc1a9e2",
-    pledgeLock: zero,
-    campaignLock: zero,
-    receipt: zero,
-  };
-  const fallback = network === "devnet" ? devnetDefaults : { campaign: zero, pledge: zero, pledgeLock: zero, campaignLock: zero, receipt: zero };
+function buildNetworkContracts(): ContractsConfig {
   return {
     campaign: {
       codeHash: CAMPAIGN_CODE_HASH,
       hashType: "data2",
-      txHash: process.env.NEXT_PUBLIC_CAMPAIGN_TX_HASH || fallback.campaign,
+      txHash: process.env.NEXT_PUBLIC_CAMPAIGN_TX_HASH || ZERO_HASH,
       index: 0,
     },
     pledge: {
       codeHash: PLEDGE_CODE_HASH,
       hashType: "data2",
-      txHash: process.env.NEXT_PUBLIC_PLEDGE_TX_HASH || fallback.pledge,
+      txHash: process.env.NEXT_PUBLIC_PLEDGE_TX_HASH || ZERO_HASH,
       index: 0,
     },
     pledgeLock: {
       codeHash: PLEDGE_LOCK_CODE_HASH,
       hashType: "data2",
-      txHash: process.env.NEXT_PUBLIC_PLEDGE_LOCK_TX_HASH || fallback.pledgeLock,
+      txHash: process.env.NEXT_PUBLIC_PLEDGE_LOCK_TX_HASH || ZERO_HASH,
       index: 0,
     },
     campaignLock: {
       codeHash: CAMPAIGN_LOCK_CODE_HASH,
       hashType: "data2",
-      txHash: process.env.NEXT_PUBLIC_CAMPAIGN_LOCK_TX_HASH || fallback.campaignLock,
+      txHash: process.env.NEXT_PUBLIC_CAMPAIGN_LOCK_TX_HASH || ZERO_HASH,
       index: 0,
     },
     receipt: {
       codeHash: RECEIPT_CODE_HASH,
       hashType: "data2",
-      txHash: process.env.NEXT_PUBLIC_RECEIPT_TX_HASH || fallback.receipt,
+      txHash: process.env.NEXT_PUBLIC_RECEIPT_TX_HASH || ZERO_HASH,
       index: 0,
     },
   };
 }
 
-const CONTRACTS_BY_NETWORK: Record<NetworkType, ContractsConfig> = {
-  devnet: buildNetworkContracts("devnet"),
-  testnet: buildNetworkContracts("testnet"),
-  mainnet: buildNetworkContracts("mainnet"),
-};
-
-export const CONTRACTS = CONTRACTS_BY_NETWORK[NETWORK];
+export const CONTRACTS = buildNetworkContracts();
 
 /**
  * RPC URLs per network
@@ -169,10 +146,11 @@ export const MIN_PLEDGE_CKB = 100;
 export const PLEDGE_CELL_OVERHEAD = BigInt(Math.ceil((8 + PLEDGE_DATA_SIZE + 65 + 65) * 1.2)) * BigInt(100000000);
 
 /**
- * Capacity of a receipt cell, in shannons. Same formula as the transaction builder. The
- * backer reclaims it once the campaign is finalized.
+ * Capacity of a receipt cell, in shannons. Same formula as the transaction builder's
+ * calculateCellCapacity(80, true, 65, 64): the receipt type script carries 64 bytes of args
+ * (pledge and pledge-lock code hashes). The backer reclaims it once the campaign is finalized.
  */
-export const RECEIPT_CELL_CAPACITY = BigInt(Math.ceil((8 + RECEIPT_DATA_SIZE + 65 + 65) * 1.2)) * BigInt(100000000);
+export const RECEIPT_CELL_CAPACITY = BigInt(Math.ceil((8 + RECEIPT_DATA_SIZE + 65 + 97) * 1.2)) * BigInt(100000000);
 
 /**
  * CKB Explorer base URLs per network

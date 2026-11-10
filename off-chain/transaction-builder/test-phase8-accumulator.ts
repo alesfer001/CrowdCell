@@ -32,6 +32,7 @@ import {
   serializeReceiptData,
   serializePledgeLockArgs,
   calculateCellCapacity,
+  serializeReceiptTypeArgs,
 } from "./src/serializer";
 
 const rpcUrl = "http://127.0.0.1:8114";
@@ -334,7 +335,7 @@ async function submitPledgeTx(
   const receiptData = serializeReceiptData(amount, backerLockHash, campaignTypeScriptHash, deadline);
   const pledgeLockArgs = serializePledgeLockArgs(campaignTypeScriptHash, deadline, backerLockHash);
   const pledgeCapacity = calculateCellCapacity(72, true, 65) + amount;
-  const receiptCapacity = calculateCellCapacity(80, true, 65);
+  const receiptCapacity = calculateCellCapacity(80, true, 65, 64);
 
   const tx = ccc.Transaction.from({
     inputs: [{ previousOutput: campaignCell.outPoint }],
@@ -348,7 +349,7 @@ async function submitPledgeTx(
       {
         capacity: receiptCapacity,
         lock: backerLockScript,
-        type: { codeHash: receiptContract.codeHash, hashType: receiptContract.hashType, args: ccc.hexFrom(pledgeContract.codeHash.slice(2)) },
+        type: { codeHash: receiptContract.codeHash, hashType: receiptContract.hashType, args: serializeReceiptTypeArgs(pledgeContract.codeHash, pledgeLockContract.codeHash) },
       },
     ],
     outputsData: [newCampaignData, pledgeData, receiptData],

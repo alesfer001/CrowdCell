@@ -6,7 +6,8 @@
  *   npx ts-node seed-testnet-demo.ts             # creates wallets, campaigns and pledges
  *
  * Wallets:
- *   - Funder: the testnet deployer (deployment/testnet-deployer.json). It pays for everything.
+ *   - Funder: the testnet deployer (DEPLOYER_PRIVATE_KEY in off-chain/transaction-builder/.env,
+ *     the same key deploy-contracts.ts uses). It pays for everything.
  *   - Demo creators and backers: fresh keys generated on first run and stored in
  *     deployment/testnet-demo-wallets.json (gitignored), so each campaign has distinct backers.
  *
@@ -20,6 +21,7 @@ import { ccc } from "@ckb-ccc/core";
 import { TransactionBuilder } from "./src";
 import type { ContractInfo } from "./src/types";
 import { createCkbClient } from "./src/ckbClient";
+import { deployerKeyFromEnvFile } from "./deployerKey";
 import { waitForTx, campaignTypeArgs, sleep } from "./test-helpers";
 
 const RPC_URL = "https://testnet.ckbapp.dev/";
@@ -31,7 +33,7 @@ const DAY_BLOCKS = BigInt((24 * 3600) / SECONDS_PER_BLOCK);
 
 /** Pledge cell and receipt cell overheads, as the frontend computes them */
 const PLEDGE_OVERHEAD = BigInt(Math.ceil((8 + 72 + 65 + 65) * 1.2)) * CKB;
-const RECEIPT_OVERHEAD = BigInt(Math.ceil((8 + 80 + 65 + 65) * 1.2)) * CKB;
+const RECEIPT_OVERHEAD = BigInt(Math.ceil((8 + 80 + 65 + 97) * 1.2)) * CKB;
 /** Headroom per wallet for fees and change cells */
 const WALLET_BUFFER = BigInt(80) * CKB;
 
@@ -154,7 +156,8 @@ async function main() {
     contracts.receipt
   );
 
-  const funderKey = JSON.parse(fs.readFileSync(path.join(DEPLOYMENT, "testnet-deployer.json"), "utf-8")).privateKey;
+  const funderKey = deployerKeyFromEnvFile();
+  if (!funderKey) throw new Error("DEPLOYER_PRIVATE_KEY missing from off-chain/transaction-builder/.env");
   const funder = new ccc.SignerCkbPrivateKey(client, funderKey);
   const keys = loadOrCreateWallets(dryRun);
   const signers = Object.fromEntries(
