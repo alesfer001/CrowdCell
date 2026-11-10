@@ -3,6 +3,7 @@ import { Campaign, Pledge, Receipt, CampaignStatus } from "./types";
 import { parseCampaignData, parsePledgeData, parseReceiptData } from "./parser";
 import { Database, DBCampaign, DBPledge, DBReceipt } from "./database";
 import { FinalizationBot } from "./bot";
+import { BackerPosition, ReceiptRecord } from "./wallet";
 
 /**
  * Create a network-aware CKB client
@@ -141,7 +142,9 @@ export class CampaignIndexer {
   private receiptCodeHash: string = "";
   /** Every backer a campaign has ever had, keyed by the pledge linkage hash (lowercase) */
   private backerHistory = new Map<string, Set<string>>();
-  /** Receipt outputs already folded into backerHistory ("txHash_index") */
+  /** Every receipt a backer has ever received, reclaimed ones included, keyed by backer lock hash (lowercase) */
+  private receiptHistory = new Map<string, ReceiptRecord[]>();
+  /** Receipt outputs already folded into backerHistory and receiptHistory ("txHash_index") */
   private seenReceiptOutputs = new Set<string>();
   private pledgeLockCodeHash: string = "";
   private initialSyncComplete = false;
@@ -442,6 +445,7 @@ export class CampaignIndexer {
             status: "live",
             block_number: blockNumber.toString(),
             created_at: blockNumber.toString(),
+            capacity: cell.cellOutput.capacity.toString(),
           });
         } catch (error) {
           console.error("Error parsing receipt cell:", error);
@@ -623,6 +627,46 @@ export class CampaignIndexer {
   }
 
   /**
+   * Campaigns created by a lock hash
+   */
+  getCampaignsByCreator(lockHash: string): Campaign[] {
+    return this.db.getCampaignsByCreator(lockHash).map((row) => this.dbToCampaign(row));
+  }
+
+  /**
+   * Everything a backer has in each campaign they backed: every receipt they ever got
+   * (reclaimed ones included), the receipts still live, and the pledge cells still live.
+   * Grouped by pledge linkage hash, so it lines up with getPledgesForCampaign.
+   */
+  getBackerPositions(lockHash: string): BackerPosition[] {
+    const backer = lockHash.toLowerCase();
+    const positions = new Map<string, BackerPosition>();
+    const position = (linkage: string): BackerPosition => {
+      const key = linkage.toLowerCase();
+      let p = positions.get(key);
+      if (!p) {
+        p = { linkage: key, campaign: undefined, receipts: [], liveReceipts: [], livePledges: [] };
+        positions.set(key, p);
+      }
+      return p;
+    };
+
+    for (const r of this.receiptHistory.get(backer) ?? []) position(r.linkage).receipts.push(r);
+    for (const r of this.getReceiptsForBacker(backer)) {
+      // Receipt campaign_id is the linkage hash, sometimes with an "_0" suffix
+      position(r.campaignId.split("_")[0]).liveReceipts.push(r);
+    }
+    for (const p of this.getPledgesForBacker(backer)) position(p.campaignId).livePledges.push(p);
+
+    const byLinkage = new Map(
+      this.getCampaigns().map((c) => [this.getPledgeLinkageTxHash(c).toLowerCase(), c] as const)
+    );
+    for (const p of positions.values()) p.campaign = byLinkage.get(p.linkage);
+
+    return [...positions.values()].filter((p) => p.linkage !== "");
+  }
+
+  /**
    * Get campaign by ID
    */
   getCampaign(id: string): Campaign | undefined {
@@ -687,6 +731,7 @@ export class CampaignIndexer {
       pledgeAmount: BigInt(row.pledge_amount),
       status: row.status,
       createdAt: BigInt(row.created_at),
+      capacity: BigInt(row.capacity ?? "0"),
     };
   }
 
@@ -747,8 +792,17 @@ export class CampaignIndexer {
         const pledgeIndex = tx.outputs.findIndex((o) => o.type?.codeHash === pledgeCodeHash);
         if (pledgeIndex >= 0) {
           const linkage = parsePledgeData(tx.outputsData[pledgeIndex]).campaignId.toLowerCase();
+          const backer = receipt.backerLockHash.toLowerCase();
           if (!this.backerHistory.has(linkage)) this.backerHistory.set(linkage, new Set());
-          this.backerHistory.get(linkage)!.add(receipt.backerLockHash.toLowerCase());
+          this.backerHistory.get(linkage)!.add(backer);
+          if (!this.receiptHistory.has(backer)) this.receiptHistory.set(backer, []);
+          this.receiptHistory.get(backer)!.push({
+            receiptId: key,
+            linkage,
+            backerLockHash: backer,
+            pledgeAmount: receipt.pledgeAmount,
+            blockNumber: BigInt(entry.blockNumber),
+          });
         }
         this.seenReceiptOutputs.add(key);
       }

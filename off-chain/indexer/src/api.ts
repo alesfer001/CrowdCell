@@ -1,7 +1,17 @@
 import express from "express";
 import cors from "cors";
 import { CampaignIndexer } from "./indexer";
-import { CampaignStatus } from "./types";
+import { Campaign, Pledge, Receipt } from "./types";
+import {
+  canReclaimDeposits,
+  computeEffectiveStatus,
+  contributedAmount,
+  creatorActions,
+  pledgeOutcome,
+} from "./wallet";
+
+/** A lock hash: 0x + 32 bytes hex */
+const LOCK_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
 /**
  * Simple REST API for campaign indexer.
@@ -44,37 +54,7 @@ export class IndexerAPI {
         const campaigns = this.indexer.getCampaigns();
         const currentBlock = await this.indexer.getCurrentBlockNumber();
 
-        const serialized = campaigns.map((c) => {
-          // v1.2: total_pledged is a real on-chain accumulator, so the campaign cell is
-          // the source of truth. calculateTotalPledged() summed live pledge cells (falling
-          // back to receipts once they were consumed) only because the cell held 0.
-          const totalPledged = c.totalPledged;
-          const effectiveStatus = this.computeEffectiveStatus(
-            c.status, c.deadlineBlock, totalPledged, c.fundingGoal, currentBlock
-          );
-          return {
-            campaignId: c.id,
-            // Stable across the campaign's life; the campaign cell's out point is not.
-            // Pledges record this as their campaign_id, which is how they stay linked.
-            originalTxHash: c.originalTxHash || c.txHash,
-            creator: c.creatorLockHash,
-            creatorLockScript: c.creatorLockScript || null,
-            title: c.title,
-            description: c.description,
-            fundingGoal: c.fundingGoal.toString(),
-            deadlineBlock: c.deadlineBlock.toString(),
-            totalPledged: totalPledged.toString(),
-            status: c.status,
-            effectiveStatus,
-            txHash: c.txHash,
-            index: c.index,
-            createdAt: c.createdAt.toString(),
-            receiptCount: this.indexer.getReceiptsForCampaign(c.id).length,
-            backerCount: this.indexer.getUniqueBackerCount(c.id),
-          };
-        });
-
-        res.json(serialized);
+        res.json(campaigns.map((c) => this.serializeCampaign(c, currentBlock)));
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -89,32 +69,8 @@ export class IndexerAPI {
           return res.status(404).json({ error: "Campaign not found" });
         }
 
-        const totalPledged = campaign.totalPledged;
         const currentBlock = await this.indexer.getCurrentBlockNumber();
-        const effectiveStatus = this.computeEffectiveStatus(
-          campaign.status, campaign.deadlineBlock, totalPledged, campaign.fundingGoal, currentBlock
-        );
-
-        const serialized = {
-          campaignId: campaign.id,
-          originalTxHash: campaign.originalTxHash || campaign.txHash,
-          creator: campaign.creatorLockHash,
-          creatorLockScript: campaign.creatorLockScript || null,
-          title: campaign.title,
-          description: campaign.description,
-          fundingGoal: campaign.fundingGoal.toString(),
-          deadlineBlock: campaign.deadlineBlock.toString(),
-          totalPledged: totalPledged.toString(),
-          status: campaign.status,
-          effectiveStatus,
-          txHash: campaign.txHash,
-          index: campaign.index,
-          createdAt: campaign.createdAt.toString(),
-          receiptCount: this.indexer.getReceiptsForCampaign(campaign.id).length,
-          backerCount: this.indexer.getUniqueBackerCount(campaign.id),
-        };
-
-        res.json(serialized);
+        res.json(this.serializeCampaign(campaign, currentBlock));
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -125,18 +81,7 @@ export class IndexerAPI {
       try {
         const pledges = this.indexer.getPledgesForCampaign(req.params.id);
 
-        const serialized = pledges.map((p) => ({
-          pledgeId: p.id,
-          campaignId: p.campaignId,
-          backer: p.backerLockHash,
-          backerLockScript: p.backerLockScript || null,
-          amount: p.amount.toString(),
-          txHash: p.txHash,
-          index: p.index,
-          createdAt: p.createdAt.toString(),
-        }));
-
-        res.json(serialized);
+        res.json(pledges.map((p) => this.serializePledge(p)));
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -147,18 +92,7 @@ export class IndexerAPI {
       try {
         const pledges = this.indexer.getPledgesForBacker(req.params.lockHash);
 
-        const serialized = pledges.map((p) => ({
-          pledgeId: p.id,
-          campaignId: p.campaignId,
-          backer: p.backerLockHash,
-          backerLockScript: p.backerLockScript || null,
-          amount: p.amount.toString(),
-          txHash: p.txHash,
-          index: p.index,
-          createdAt: p.createdAt.toString(),
-        }));
-
-        res.json(serialized);
+        res.json(pledges.map((p) => this.serializePledge(p)));
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -169,18 +103,7 @@ export class IndexerAPI {
       try {
         const pledges = this.indexer.getPledges();
 
-        const serialized = pledges.map((p) => ({
-          pledgeId: p.id,
-          campaignId: p.campaignId,
-          backer: p.backerLockHash,
-          backerLockScript: p.backerLockScript || null,
-          amount: p.amount.toString(),
-          txHash: p.txHash,
-          index: p.index,
-          createdAt: p.createdAt.toString(),
-        }));
-
-        res.json(serialized);
+        res.json(pledges.map((p) => this.serializePledge(p)));
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -190,17 +113,7 @@ export class IndexerAPI {
     this.app.get("/receipts", async (req, res) => {
       try {
         const receipts = this.indexer.getReceipts();
-        const serialized = receipts.map((r) => ({
-          receiptId: r.id,
-          campaignId: r.campaignId,
-          backer: r.backerLockHash,
-          pledgeAmount: r.pledgeAmount.toString(),
-          status: r.status,
-          txHash: r.txHash,
-          index: r.index,
-          createdAt: r.createdAt.toString(),
-        }));
-        res.json(serialized);
+        res.json(receipts.map((r) => this.serializeReceipt(r)));
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -210,17 +123,7 @@ export class IndexerAPI {
     this.app.get("/receipts/backer/:lockHash", async (req, res) => {
       try {
         const receipts = this.indexer.getReceiptsForBacker(req.params.lockHash);
-        const serialized = receipts.map((r) => ({
-          receiptId: r.id,
-          campaignId: r.campaignId,
-          backer: r.backerLockHash,
-          pledgeAmount: r.pledgeAmount.toString(),
-          status: r.status,
-          txHash: r.txHash,
-          index: r.index,
-          createdAt: r.createdAt.toString(),
-        }));
-        res.json(serialized);
+        res.json(receipts.map((r) => this.serializeReceipt(r)));
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -230,17 +133,60 @@ export class IndexerAPI {
     this.app.get("/receipts/campaign/:campaignId", async (req, res) => {
       try {
         const receipts = this.indexer.getReceiptsForCampaign(req.params.campaignId);
-        const serialized = receipts.map((r) => ({
-          receiptId: r.id,
-          campaignId: r.campaignId,
-          backer: r.backerLockHash,
-          pledgeAmount: r.pledgeAmount.toString(),
-          status: r.status,
-          txHash: r.txHash,
-          index: r.index,
-          createdAt: r.createdAt.toString(),
+        res.json(receipts.map((r) => this.serializeReceipt(r)));
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Campaigns created by a wallet, with what the creator can do next on each
+    this.app.get("/wallet/:lockHash/campaigns", async (req, res) => {
+      try {
+        const { lockHash } = req.params;
+        if (!LOCK_HASH_RE.test(lockHash)) {
+          return res.status(400).json({ error: "lockHash must be 0x followed by 64 hex characters" });
+        }
+        const currentBlock = await this.indexer.getCurrentBlockNumber();
+        const campaigns = this.indexer.getCampaignsByCreator(lockHash);
+
+        res.json(campaigns.map((c) => {
+          const livePledges = this.indexer.getPledgesForCampaign(c.id);
+          return {
+            ...this.serializeCampaign(c, currentBlock),
+            livePledgeCount: livePledges.length,
+            livePledgedAmount: livePledges.reduce((sum, p) => sum + p.amount, 0n).toString(),
+            actions: creatorActions(c, livePledges.length, currentBlock),
+          };
         }));
-        res.json(serialized);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Every campaign a wallet backed: what it pledged, where the pledges stand, and the
+    // receipt deposits it can reclaim. Reclaimed receipts still count toward the history.
+    this.app.get("/wallet/:lockHash/pledges", async (req, res) => {
+      try {
+        const { lockHash } = req.params;
+        if (!LOCK_HASH_RE.test(lockHash)) {
+          return res.status(400).json({ error: "lockHash must be 0x followed by 64 hex characters" });
+        }
+        const currentBlock = await this.indexer.getCurrentBlockNumber();
+        const positions = this.indexer.getBackerPositions(lockHash);
+
+        res.json(positions.map((p) => ({
+          linkage: p.linkage,
+          campaign: p.campaign ? this.serializeCampaign(p.campaign, currentBlock) : null,
+          outcome: pledgeOutcome(p, currentBlock),
+          contributed: contributedAmount(p).toString(),
+          pledgeCount: Math.max(p.receipts.length, p.liveReceipts.length),
+          livePledges: p.livePledges.map((pl) => this.serializePledge(pl)),
+          liveReceipts: p.liveReceipts.map((r) => this.serializeReceipt(r)),
+          reclaimableDeposit: canReclaimDeposits(p)
+            ? p.liveReceipts.reduce((sum, r) => sum + r.capacity, 0n).toString()
+            : "0",
+          lockedDeposit: p.liveReceipts.reduce((sum, r) => sum + r.capacity, 0n).toString(),
+        })));
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -258,19 +204,57 @@ export class IndexerAPI {
   }
 
   /**
-   * Compute effective campaign status based on on-chain status + deadline + funding
+   * Campaign as the API returns it. v1.2: total_pledged is a real on-chain accumulator, so the
+   * campaign cell is the source of truth for the amount raised.
    */
-  private computeEffectiveStatus(
-    onChainStatus: CampaignStatus,
-    deadlineBlock: bigint,
-    totalPledged: bigint,
-    fundingGoal: bigint,
-    currentBlock: bigint
-  ): string {
-    if (onChainStatus === CampaignStatus.Success) return "success";
-    if (onChainStatus === CampaignStatus.Failed) return "failed";
-    if (currentBlock < deadlineBlock) return "active";
-    return totalPledged >= fundingGoal ? "expired_success" : "expired_failed";
+  private serializeCampaign(c: Campaign, currentBlock: bigint) {
+    return {
+      campaignId: c.id,
+      // Stable across the campaign's life; the campaign cell's out point is not.
+      // Pledges record this as their campaign_id, which is how they stay linked.
+      originalTxHash: c.originalTxHash || c.txHash,
+      creator: c.creatorLockHash,
+      creatorLockScript: c.creatorLockScript || null,
+      title: c.title,
+      description: c.description,
+      fundingGoal: c.fundingGoal.toString(),
+      deadlineBlock: c.deadlineBlock.toString(),
+      totalPledged: c.totalPledged.toString(),
+      status: c.status,
+      effectiveStatus: computeEffectiveStatus(c.status, c.deadlineBlock, c.totalPledged, c.fundingGoal, currentBlock),
+      txHash: c.txHash,
+      index: c.index,
+      createdAt: c.createdAt.toString(),
+      receiptCount: this.indexer.getReceiptsForCampaign(c.id).length,
+      backerCount: this.indexer.getUniqueBackerCount(c.id),
+    };
+  }
+
+  private serializePledge(p: Pledge) {
+    return {
+      pledgeId: p.id,
+      campaignId: p.campaignId,
+      backer: p.backerLockHash,
+      backerLockScript: p.backerLockScript || null,
+      amount: p.amount.toString(),
+      txHash: p.txHash,
+      index: p.index,
+      createdAt: p.createdAt.toString(),
+    };
+  }
+
+  private serializeReceipt(r: Receipt) {
+    return {
+      receiptId: r.id,
+      campaignId: r.campaignId,
+      backer: r.backerLockHash,
+      pledgeAmount: r.pledgeAmount.toString(),
+      status: r.status,
+      txHash: r.txHash,
+      index: r.index,
+      createdAt: r.createdAt.toString(),
+      capacity: r.capacity.toString(),
+    };
   }
 
   /**

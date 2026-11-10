@@ -99,4 +99,5 @@ export interface Receipt extends ReceiptData {
   campaignId: string;        // derived from associated pledge in same tx
   status: string;            // "live" or "spent"
   createdAt: bigint;         // block number
+  capacity: bigint;          // the deposit the backer gets back when reclaiming it (shannons)
 }

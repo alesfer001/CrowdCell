@@ -43,6 +43,7 @@ export interface DBReceipt {
   status: string;
   block_number: string;
   created_at: string;
+  capacity: string | null;
 }
 
 /**
@@ -106,7 +107,8 @@ export class Database {
         pledge_amount TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'live',
         block_number TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        capacity TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_receipts_campaign ON receipts(campaign_id);
@@ -142,6 +144,12 @@ export class Database {
       this.db.exec("ALTER TABLE pledges ADD COLUMN backer_lock_hash_type TEXT");
       this.db.exec("ALTER TABLE pledges ADD COLUMN backer_lock_args TEXT");
     }
+
+    // Receipt cell capacity, so dashboards can show the deposit a backer gets back (M1)
+    const receiptColumns = this.db.prepare("PRAGMA table_info(receipts)").all() as { name: string }[];
+    if (!receiptColumns.some((c) => c.name === "capacity")) {
+      this.db.exec("ALTER TABLE receipts ADD COLUMN capacity TEXT");
+    }
   }
 
   /**
@@ -160,8 +168,8 @@ export class Database {
     `);
 
     const insertReceipt = this.db.prepare(`
-      INSERT OR REPLACE INTO receipts (id, tx_hash, output_index, campaign_id, backer_lock_hash, pledge_amount, status, block_number, created_at)
-      VALUES (@id, @tx_hash, @output_index, @campaign_id, @backer_lock_hash, @pledge_amount, @status, @block_number, @created_at)
+      INSERT OR REPLACE INTO receipts (id, tx_hash, output_index, campaign_id, backer_lock_hash, pledge_amount, status, block_number, created_at, capacity)
+      VALUES (@id, @tx_hash, @output_index, @campaign_id, @backer_lock_hash, @pledge_amount, @status, @block_number, @created_at, @capacity)
     `);
 
     const transaction = this.db.transaction(() => {
@@ -190,6 +198,12 @@ export class Database {
 
   getAllCampaigns(): DBCampaign[] {
     return this.db.prepare("SELECT * FROM campaigns").all() as DBCampaign[];
+  }
+
+  getCampaignsByCreator(lockHash: string): DBCampaign[] {
+    return this.db
+      .prepare("SELECT * FROM campaigns WHERE lower(creator_lock_hash) = ?")
+      .all(lockHash.toLowerCase()) as DBCampaign[];
   }
 
   getCampaign(id: string): DBCampaign | undefined {
