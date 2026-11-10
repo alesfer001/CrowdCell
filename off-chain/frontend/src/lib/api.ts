@@ -1,4 +1,4 @@
-import { Campaign, IndexerStatus, Pledge, Receipt, WalletCampaign } from "./types";
+import { Campaign, IndexerStatus, Pledge, Receipt, WalletCampaign, WalletPledgePosition } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -38,6 +38,17 @@ export async function fetchWalletCampaigns(lockHash: string): Promise<WalletCamp
   const res = await apiFetch(`${API_BASE}/wallet/${encodeURIComponent(lockHash)}/campaigns`);
   if (!res.ok) {
     throw new Error(`Failed to fetch your campaigns: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+/**
+ * Fetch every campaign a wallet backed, with where its pledges stand and its deposits
+ */
+export async function fetchWalletPledges(lockHash: string): Promise<WalletPledgePosition[]> {
+  const res = await apiFetch(`${API_BASE}/wallet/${encodeURIComponent(lockHash)}/pledges`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch your pledges: ${res.statusText}`);
   }
   return res.json();
 }

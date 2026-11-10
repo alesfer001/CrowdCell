@@ -1,7 +1,7 @@
 import { ccc } from "@ckb-ccc/connector-react";
-import { Campaign, CampaignStatus, Pledge } from "./types";
+import { Campaign, CampaignStatus, Pledge, Receipt } from "./types";
 import { CONTRACTS, GRACE_PERIOD_BLOCKS } from "./constants";
-import { readTotalPledged, readFundingGoal, withCampaignStatus } from "./serialization";
+import { readCampaignStatus, readTotalPledged, readFundingGoal, withCampaignStatus } from "./serialization";
 
 /**
  * Transactions a campaign's lifecycle needs after the deadline: finalize, release or refund a
@@ -200,4 +200,62 @@ export async function sendDestroy(signer: ccc.Signer, campaign: Campaign): Promi
   tx.witnesses.push("0x");
   await tx.completeFeeChangeToOutput(signer, 0, 1000);
   return signer.sendTransaction(tx);
+}
+
+/**
+ * Reclaim a backer's receipt deposits for one campaign.
+ *
+ * Every pledge leaves a receipt cell in the backer's wallet. Once the campaign is finalized
+ * the receipt type script lets the backer destroy it, with the finalized campaign cell as a
+ * cell dep, so all of the given receipts go back into one plain cell in a single
+ * transaction. The fee comes out of the reclaimed capacity.
+ */
+export async function sendReclaimReceipts(
+  signer: ccc.Signer,
+  campaign: Campaign,
+  receipts: Receipt[]
+): Promise<{ hash: string; total: bigint; reclaimed: Set<string> }> {
+  const client = signer.client;
+
+  const { cell: campaignCell } = await resolveLiveCampaignCell(client, campaign.campaignId);
+  if (readCampaignStatus(ccc.hexFrom(campaignCell.outputData)) === CampaignStatus.Active) {
+    throw new Error("The campaign has to be finalized before deposits can be reclaimed");
+  }
+
+  const inputs: { previousOutput: { txHash: string; index: number } }[] = [];
+  let total = BigInt(0);
+  let lock: ccc.Script | undefined;
+  let legacy = 0;
+  for (const receipt of receipts) {
+    const receiptTx = await client.getTransaction(receipt.txHash);
+    const output = receiptTx?.transaction?.outputs[receipt.index];
+    const data = receiptTx?.transaction?.outputsData[receipt.index];
+    if (!output || data === undefined) continue;
+    // Receipts from before v1.2 carry no campaign fields and can't be reclaimed this way
+    if (ccc.bytesFrom(data).length < 80) {
+      legacy++;
+      continue;
+    }
+    inputs.push({ previousOutput: { txHash: receipt.txHash, index: receipt.index } });
+    total += BigInt(output.capacity);
+    lock = ccc.Script.from(output.lock);
+  }
+  if (inputs.length === 0 || !lock) {
+    throw new Error(legacy > 0 ? "These receipts predate v1.2 and can't be reclaimed here" : "No receipts found to reclaim");
+  }
+
+  const tx = ccc.Transaction.from({
+    inputs,
+    outputs: [{ capacity: total, lock }],
+    outputsData: ["0x"],
+    cellDeps: [
+      { outPoint: campaignCell.outPoint, depType: "code" },
+      { outPoint: { txHash: CONTRACTS.receipt.txHash, index: CONTRACTS.receipt.index }, depType: "code" },
+    ],
+  });
+  await tx.completeFeeChangeToOutput(signer, 0, 1000);
+
+  const hash = await signer.sendTransaction(tx);
+  const reclaimed = new Set(inputs.map((i) => `${i.previousOutput.txHash}_${i.previousOutput.index}`.toLowerCase()));
+  return { hash, total, reclaimed };
 }

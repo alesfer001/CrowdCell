@@ -28,11 +28,10 @@ import {
   u64ToHexLE,
   serializeMetadataHex,
   readTotalPledged,
-  readCampaignStatus,
   withTotalPledged,
   receiptTypeArgs,
 } from "@/lib/serialization";
-import { resolveLiveCampaignCell, sendFinalize, sendRelease, sendRefund, sendDestroy } from "@/lib/campaignActions";
+import { resolveLiveCampaignCell, sendFinalize, sendRelease, sendRefund, sendDestroy, sendReclaimReceipts } from "@/lib/campaignActions";
 import { useDevnet } from "@/components/DevnetContext";
 import { useWalletLockHash } from "@/components/useWallet";
 import { useToast } from "@/components/Toast";
@@ -489,69 +488,16 @@ export default function CampaignDetailPage() {
     }
   }
 
-  /**
-   * Reclaim the connected wallet's receipt deposits for this campaign.
-   *
-   * Every pledge leaves a receipt cell in the backer's wallet. Once the campaign is finalized
-   * the receipt type script lets the backer destroy it, with the finalized campaign cell as a
-   * cell dep, so all of the wallet's receipts go back into one plain cell in a single
-   * transaction. The fee comes out of the reclaimed capacity.
-   */
+  /** Reclaim the connected wallet's receipt deposits for this campaign (see sendReclaimReceipts) */
   async function handleReclaimReceipts(ownReceipts: Receipt[]) {
     if (!signer || !campaign || ownReceipts.length === 0) return;
     setReclaiming(true);
 
     try {
-      const client = signer.client;
-
-      const { cell: campaignCell } = await resolveLiveCampaignCell(client, campaign.campaignId);
-      if (readCampaignStatus(ccc.hexFrom(campaignCell.outputData)) === CampaignStatus.Active) {
-        toast("warning", "The campaign has to be finalized before deposits can be reclaimed");
-        return;
-      }
-
-      const inputs: { previousOutput: { txHash: string; index: number } }[] = [];
-      let total = BigInt(0);
-      let lock: ccc.Script | undefined;
-      let legacy = 0;
-      for (const receipt of ownReceipts) {
-        const receiptTx = await client.getTransaction(receipt.txHash);
-        const output = receiptTx?.transaction?.outputs[receipt.index];
-        const data = receiptTx?.transaction?.outputsData[receipt.index];
-        if (!output || data === undefined) continue;
-        // Receipts from before v1.2 carry no campaign fields and can't be reclaimed this way
-        if (ccc.bytesFrom(data).length < 80) {
-          legacy++;
-          continue;
-        }
-        inputs.push({ previousOutput: { txHash: receipt.txHash, index: receipt.index } });
-        total += BigInt(output.capacity);
-        lock = ccc.Script.from(output.lock);
-      }
-      if (inputs.length === 0 || !lock) {
-        toast("error", legacy > 0 ? "These receipts predate v1.2 and can't be reclaimed here" : "No receipts found to reclaim");
-        return;
-      }
-
-      const tx = ccc.Transaction.from({
-        inputs,
-        outputs: [{ capacity: total, lock }],
-        outputsData: ["0x"],
-        cellDeps: [
-          { outPoint: campaignCell.outPoint, depType: "code" },
-          {
-            outPoint: { txHash: CONTRACTS.receipt.txHash, index: CONTRACTS.receipt.index },
-            depType: "code",
-          },
-        ],
-      });
-      await tx.completeFeeChangeToOutput(signer, 0, 1000);
-
-      const hash = await signer.sendTransaction(tx);
+      const { hash, total, reclaimed } = await sendReclaimReceipts(signer, campaign, ownReceipts);
       setActionTxHash(hash);
       toast("success", `Reclaiming ${formatCost(total)} CKB in deposits`);
 
-      const reclaimed = new Set(inputs.map((i) => `${i.previousOutput.txHash}_${i.previousOutput.index}`.toLowerCase()));
       await pollForChange(async () => {
         const updated = await fetchReceiptsForCampaign(campaignId).catch(() => [] as Receipt[]);
         const stillThere = updated.some((r) => reclaimed.has(`${r.txHash}_${r.index}`.toLowerCase()));

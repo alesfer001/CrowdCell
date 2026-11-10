@@ -20,17 +20,16 @@ import { CellMeter, CellMeterTone } from "@/components/CellMeter";
 import { SkeletonCard } from "@/components/Skeleton";
 import { useActiveWallet } from "@/components/useWallet";
 import { useToast } from "@/components/Toast";
-import { useIndexerReady, IndexerStatusBadge, IndexerWaitNotice } from "@/components/IndexerStatus";
-
-const EMPTY_STATE = "text-center py-12 border border-dashed border-line rounded-[14px] text-ink-2";
-const PRIMARY_BUTTON =
-  "inline-flex items-center justify-center px-4 py-2.5 rounded-lg font-semibold text-sm bg-fund text-fund-ink hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]";
-const SECONDARY_BUTTON =
-  "inline-flex items-center justify-center px-4 py-2.5 rounded-lg font-semibold text-sm border border-line hover:bg-surface-3 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]";
-
-/** How often, and how many times, to reload after sending a transaction until the indexer shows it */
-const REFRESH_INTERVAL_MS = 4000;
-const REFRESH_ATTEMPTS = 10;
+import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
+import {
+  CARD,
+  DashboardHeader,
+  EMPTY_STATE,
+  PRIMARY_BUTTON,
+  REFRESH_ATTEMPTS,
+  REFRESH_INTERVAL_MS,
+  SECONDARY_BUTTON,
+} from "@/components/Dashboard";
 
 type ActionKind = "finalize" | "release" | "refund" | "destroy";
 
@@ -143,20 +142,15 @@ export default function MyCampaignsPage() {
   return (
     <section className="py-10 md:py-12">
       <div className="max-w-6xl mx-auto px-4">
-        <div className="flex items-end justify-between gap-4 flex-wrap mb-8">
-          <div>
-            <p className="eyebrow">Dashboard</p>
-            <h1 className="font-display font-medium tracking-tight text-[clamp(24px,3.2vw,36px)] leading-[1.15] mt-2.5">
-              My campaigns
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <IndexerStatusBadge phase={indexerPhase} />
+        <DashboardHeader
+          title="My campaigns"
+          indexerPhase={indexerPhase}
+          actions={
             <Link href="/campaigns/new" className={PRIMARY_BUTTON}>
               Create a campaign
             </Link>
-          </div>
-        </div>
+          }
+        />
 
         {!signer && (
           <div className={EMPTY_STATE}>
@@ -232,7 +226,7 @@ function CampaignRow({ campaign, currentBlock, busy, anyBusy, txHash, onAction }
   const blocksLeft = currentBlock !== null ? BigInt(campaign.deadlineBlock) - currentBlock : null;
 
   return (
-    <article className="bg-surface-2 border border-line rounded-[14px] p-[18px] flex flex-col gap-3">
+    <article className={CARD}>
       <div className="flex items-start justify-between gap-2">
         <Link
           href={`/campaigns/${encodeURIComponent(canonicalCampaignId(campaign))}`}

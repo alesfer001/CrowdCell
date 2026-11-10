@@ -119,6 +119,42 @@ export interface Receipt {
   txHash: string;
   index: number;
   createdAt: string;
+  /** The receipt cell's capacity: the deposit its backer gets back (shannons) */
+  capacity?: string;
+}
+
+/**
+ * Where a backer's pledges to one campaign stand (indexer /wallet/:lockHash/pledges)
+ */
+export type PledgeOutcome =
+  | "active"
+  | "awaiting_finalization"
+  | "release_pending"
+  | "released"
+  | "refund_pending"
+  | "refunded"
+  | "closed";
+
+/**
+ * A backer's position in one campaign, as the "My pledges" dashboard sees it
+ */
+export interface WalletPledgePosition {
+  /** The campaign's creation tx hash, which links pledges and receipts to it */
+  linkage: string;
+  /** Null once the campaign cell is destroyed, or when it is from an earlier deployment */
+  campaign: Campaign | null;
+  outcome: PledgeOutcome;
+  /** Total the backer pledged, reclaimed receipts included (shannons) */
+  contributed: string;
+  pledgeCount: number;
+  /** The backer's pledge cells not yet released or refunded */
+  livePledges: Pledge[];
+  /** The backer's receipt cells not yet reclaimed */
+  liveReceipts: Receipt[];
+  /** Receipt deposits that can be reclaimed now (shannons) */
+  reclaimableDeposit: string;
+  /** Receipt deposits still held, reclaimable or not (shannons) */
+  lockedDeposit: string;
 }
 
 /**
