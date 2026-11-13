@@ -4,7 +4,7 @@ import { useState, useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { ccc } from "@ckb-ccc/connector-react";
 import { ckbToShannons, datetimeToBlockNumber, toDatetimeLocal } from "@/lib/utils";
-import { CONTRACTS, CAMPAIGN_DATA_SIZE, MIN_DEADLINE_HOURS } from "@/lib/constants";
+import { CONTRACTS, MIN_DEADLINE_HOURS } from "@/lib/constants";
 import { u64ToHexLE, serializeMetadataHex, campaignTypeArgs } from "@/lib/serialization";
 import { useDevnet } from "@/components/DevnetContext";
 import { useToast } from "@/components/Toast";
@@ -13,6 +13,11 @@ import { IndexerPhase } from "@/lib/types";
 import { CAMPAIGN_CATEGORIES } from "@/lib/categories";
 import { Select } from "@/components/Select";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
+import {
+  listControlledVellumDids,
+  vellumDidLabel,
+  type ControlledVellumDid,
+} from "@/lib/vellum";
 
 /** The browser's time zone; null during the server render, which cannot know it */
 function useTimeZone(): string | null {
@@ -41,6 +46,10 @@ export default function CreateCampaignPage() {
   const [category, setCategory] = useState("");
   const [fundingGoal, setFundingGoal] = useState("");
   const [deadlineDateTime, setDeadlineDateTime] = useState("");
+  const [creatorDid, setCreatorDid] = useState("");
+  const [controlledDids, setControlledDids] = useState<ControlledVellumDid[]>([]);
+  const [didsLoading, setDidsLoading] = useState(false);
+  const [didsError, setDidsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [currentBlock, setCurrentBlock] = useState<bigint | null>(null);
   const timeZone = useTimeZone();
@@ -63,6 +72,34 @@ export default function CreateCampaignPage() {
       .then(setCurrentBlock)
       .catch(() => {});
   }, [indexerUp]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCreatorDid("");
+    setControlledDids([]);
+    setDidsError(null);
+    if (!signer) return;
+
+    setDidsLoading(true);
+    async function loadControlledDids() {
+      try {
+        const address = await signer!.getRecommendedAddress();
+        const addressObject = await ccc.Address.fromString(address, signer!.client);
+        const identities = await listControlledVellumDids(signer!.client, addressObject.script);
+        if (!cancelled) setControlledDids(identities);
+      } catch (error) {
+        if (!cancelled) {
+          setDidsError(error instanceof Error ? error.message : "Unable to load identities");
+        }
+      } finally {
+        if (!cancelled) setDidsLoading(false);
+      }
+    }
+    void loadControlledDids();
+    return () => {
+      cancelled = true;
+    };
+  }, [signer]);
 
   function validateCategory(): boolean {
     if (!CAMPAIGN_CATEGORIES.some((c) => c.slug === category)) {
@@ -149,6 +186,13 @@ export default function CreateCampaignPage() {
       const addressObj = await ccc.Address.fromString(address, client);
       const creatorLockHash = addressObj.script.hash();
 
+      if (creatorDid) {
+        const currentDids = await listControlledVellumDids(client, addressObj.script);
+        if (!currentDids.some((identity) => identity.did === creatorDid)) {
+          throw new Error("The selected Vellum identity is no longer controlled by this wallet");
+        }
+      }
+
       const fundingGoalShannons = ckbToShannons(goal);
       const deadlineBlock = BigInt(deadline);
 
@@ -166,7 +210,12 @@ export default function CreateCampaignPage() {
 
       // Title is required, so the metadata is always there; the category byte follows the description
       const categoryCode = CAMPAIGN_CATEGORIES.find((c) => c.slug === category)!.code;
-      campaignHex += serializeMetadataHex(title.trim(), description.trim(), categoryCode);
+      campaignHex += serializeMetadataHex(
+        title.trim(),
+        description.trim(),
+        categoryCode,
+        creatorDid || undefined,
+      );
 
       const campaignData = "0x" + campaignHex;
 
@@ -388,6 +437,45 @@ export default function CreateCampaignPage() {
               <p className="text-sm text-red-600 dark:text-red-400">{categoryError}</p>
             ) : (
               <p className="text-sm text-ink-3">Helps backers find your campaign (stored on-chain)</p>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="creatorDid" className="block text-sm font-medium mb-2">
+            Vellum identity <span className="text-ink-3">(optional)</span>
+          </label>
+          <Select
+            id="creatorDid"
+            value={creatorDid}
+            onChange={setCreatorDid}
+            options={[
+              { value: "", label: "No Vellum identity" },
+              ...controlledDids.map((identity) => ({
+                value: identity.did,
+                label: vellumDidLabel(identity),
+              })),
+            ]}
+            disabled={loading || didsLoading || !signer}
+            placeholder={didsLoading ? "Loading identities..." : "No Vellum identity"}
+          />
+          <div className="mt-1 text-sm text-ink-3">
+            {didsError ? (
+              <p>Vellum identities are unavailable. You can create the campaign without one.</p>
+            ) : controlledDids.length === 0 && signer && !didsLoading ? (
+              <p>
+                No controlled identity found.{" "}
+                <a
+                  href="https://dashboard.usevellum.xyz/claim"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 hover:underline"
+                >
+                  Create a Vellum DID
+                </a>
+              </p>
+            ) : (
+              <p>The selected identity is committed to this campaign on-chain.</p>
             )}
           </div>
         </div>

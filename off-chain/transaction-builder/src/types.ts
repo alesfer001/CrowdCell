@@ -8,6 +8,7 @@ export interface CampaignParams {
   title?: string; // Campaign title (stored as variable-length metadata after the 65-byte header)
   description?: string; // Campaign description
   category?: number; // Category code (1-8), one byte after the description; see indexer/src/categories.ts
+  creatorDid?: string; // Optional canonical did:ckb identifier in the immutable metadata tail
 }
 
 /**

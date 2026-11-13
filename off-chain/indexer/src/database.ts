@@ -19,6 +19,8 @@ export interface DBCampaign {
   created_at: string;
   original_tx_hash: string | null;
   category: number | null;
+  campaign_type_id: string | null;
+  creator_did: string | null;
 }
 
 export interface DBPledge {
@@ -84,7 +86,9 @@ export class Database {
         description TEXT,
         created_at TEXT NOT NULL,
         original_tx_hash TEXT,
-        category INTEGER
+        category INTEGER,
+        campaign_type_id TEXT,
+        creator_did TEXT
       );
 
       CREATE TABLE IF NOT EXISTS pledges (
@@ -151,6 +155,12 @@ export class Database {
     if (!columnNames.has("category")) {
       this.db.exec("ALTER TABLE campaigns ADD COLUMN category INTEGER");
     }
+    if (!columnNames.has("campaign_type_id")) {
+      this.db.exec("ALTER TABLE campaigns ADD COLUMN campaign_type_id TEXT");
+    }
+    if (!columnNames.has("creator_did")) {
+      this.db.exec("ALTER TABLE campaigns ADD COLUMN creator_did TEXT");
+    }
 
     // Receipt cell capacity, so dashboards can show the deposit a backer gets back (M1)
     const receiptColumns = this.db.prepare("PRAGMA table_info(receipts)").all() as { name: string }[];
@@ -165,8 +175,8 @@ export class Database {
    */
   replaceLiveCells(campaigns: DBCampaign[], pledges: DBPledge[], receipts: DBReceipt[] = []) {
     const insertCampaign = this.db.prepare(`
-      INSERT OR REPLACE INTO campaigns (id, tx_hash, output_index, creator_lock_hash, creator_lock_code_hash, creator_lock_hash_type, creator_lock_args, funding_goal, deadline_block, total_pledged, status, title, description, created_at, original_tx_hash, category)
-      VALUES (@id, @tx_hash, @output_index, @creator_lock_hash, @creator_lock_code_hash, @creator_lock_hash_type, @creator_lock_args, @funding_goal, @deadline_block, @total_pledged, @status, @title, @description, @created_at, @original_tx_hash, @category)
+      INSERT OR REPLACE INTO campaigns (id, tx_hash, output_index, creator_lock_hash, creator_lock_code_hash, creator_lock_hash_type, creator_lock_args, funding_goal, deadline_block, total_pledged, status, title, description, created_at, original_tx_hash, category, campaign_type_id, creator_did)
+      VALUES (@id, @tx_hash, @output_index, @creator_lock_hash, @creator_lock_code_hash, @creator_lock_hash_type, @creator_lock_args, @funding_goal, @deadline_block, @total_pledged, @status, @title, @description, @created_at, @original_tx_hash, @category, @campaign_type_id, @creator_did)
     `);
 
     const insertPledge = this.db.prepare(`
