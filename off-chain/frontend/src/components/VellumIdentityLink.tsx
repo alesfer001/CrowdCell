@@ -10,20 +10,31 @@ type VellumIdentityLinkProps = {
 
 export function VellumIdentityLink({ did }: VellumIdentityLinkProps) {
   const { client } = useDevnet();
-  const [identity, setIdentity] = useState<ControlledVellumDid>();
+  const [resolution, setResolution] = useState<{
+    client: typeof client;
+    did: string;
+    identity?: ControlledVellumDid;
+  }>();
 
   useEffect(() => {
     if (!client) return;
     let cancelled = false;
     void resolveVellumDid(client, did)
       .then((resolved) => {
-        if (!cancelled) setIdentity(resolved);
+        if (!cancelled) setResolution({ client, did, identity: resolved });
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setResolution({ client, did });
+      });
     return () => {
       cancelled = true;
     };
   }, [client, did]);
+
+  const identity =
+    resolution?.client === client && resolution.did === did
+      ? resolution.identity
+      : undefined;
 
   return (
     <a

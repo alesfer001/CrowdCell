@@ -19,7 +19,24 @@ function displayNameFromDocument(document: unknown): string | undefined {
     return undefined;
   }
   const displayName = profile.displayName.trim();
-  return displayName && displayName.length <= 100 ? displayName : undefined;
+  const isSafe = [...displayName].every((character) => {
+    const code = character.codePointAt(0)!;
+    return code > 0x1f && code !== 0x7f && (code < 0xd800 || code > 0xdfff);
+  });
+  return displayName && displayName.length <= 100 && isSafe ? displayName : undefined;
+}
+
+export async function transactionUsesLockInput(
+  client: ccc.Client,
+  transaction: ccc.Transaction,
+  lock: ccc.ScriptLike,
+): Promise<boolean> {
+  const expected = ccc.Script.from(lock);
+  for (const input of transaction.inputs) {
+    const cell = await input.getCell(client);
+    if (cell.cellOutput.lock.eq(expected)) return true;
+  }
+  return false;
 }
 
 export async function resolveVellumDid(

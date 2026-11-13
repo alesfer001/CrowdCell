@@ -113,8 +113,10 @@ The issuer key must control the configured DID and must be separate from `BOT_PR
 Partial or invalid issuer configuration stops indexer startup. Before issuing, the indexer verifies
 the campaign lineage, the DID controller at campaign creation, an input authorized by that
 controller, the successful finalization output, and the configured confirmation depth. It scans
-live Claim Cells before every write and derives a deterministic campaign nonce, so no persistent
-Render disk is required for duplicate suppression.
+live Claim Cells and committed Claim Cell output history before every write. The chain history and
+deterministic campaign nonce provide recovery without relying on persistent Render disk state. A
+previously committed claim remains recorded as issued after its Cell is spent, so the worker does
+not recreate it automatically.
 
 ## 5. Start the Frontend
 

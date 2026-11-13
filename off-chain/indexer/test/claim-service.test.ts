@@ -59,6 +59,7 @@ function serviceFixture(
   existingPayload?: unknown,
   options: {
     campaigns?: DBCampaign[];
+    historicalClaim?: boolean;
     mutateSignedTransaction?: boolean;
     onReconstructStart?: () => void;
     reconstructGate?: Promise<void>;
@@ -93,6 +94,7 @@ function serviceFixture(
     { getAllCampaigns: () => options.campaigns ?? [campaign] },
     config,
     {
+      hasCommittedClaim: async () => options.historicalClaim ?? false,
       reconstruct: async (_client, currentCampaign) => {
         options.reconstructedCampaignIds?.push(currentCampaign.id);
         options.onReconstructStart?.();
@@ -139,6 +141,12 @@ test("claim service prepares one transaction and waits for its pending result", 
 
 test("claim service skips a campaign already claimed by the configured issuer", async () => {
   const fixture = serviceFixture(evidence.payload);
+  await fixture.service.processEligibleCampaigns();
+  assert.deepEqual(fixture.counts(), { sends: 0, writes: 0 });
+});
+
+test("claim service recovers a spent claim from committed chain history", async () => {
+  const fixture = serviceFixture(undefined, { historicalClaim: true });
   await fixture.service.processEligibleCampaigns();
   assert.deepEqual(fixture.counts(), { sends: 0, writes: 0 });
 });

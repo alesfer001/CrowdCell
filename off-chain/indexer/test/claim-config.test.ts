@@ -29,6 +29,22 @@ test("claim issuer accepts complete Testnet settings and defaults to six confirm
   assert.equal(config?.campaignHashType, "data2");
 });
 
+test("claim issuer rejects reuse of the finalization bot credential", () => {
+  assert.throws(
+    () =>
+      loadCampaignClaimConfig(
+        {
+          BOT_PRIVATE_KEY: privateKey.toUpperCase().replace("0X", "0x"),
+          CKB_NETWORK: "testnet",
+          CROWDCELL_VELLUM_ISSUER_DID: issuerDid,
+          CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY: privateKey,
+        },
+        campaignCodeHash,
+      ),
+    /must be separate from BOT_PRIVATE_KEY/,
+  );
+});
+
 test("claim issuer rejects partial, non-Testnet, and malformed settings", () => {
   assert.throws(() =>
     loadCampaignClaimConfig(

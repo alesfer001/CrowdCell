@@ -36,6 +36,7 @@ export const campaignClaimScripts = {
 };
 
 export type CampaignClaimEnvironment = {
+  BOT_PRIVATE_KEY?: string;
   CKB_NETWORK?: string;
   CONTRACT_HASH_TYPE?: string;
   CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY?: string;
@@ -87,6 +88,12 @@ export function loadCampaignClaimConfig(
   }
   if (!privateKey || !PRIVATE_KEY_PATTERN.test(privateKey)) {
     throw new Error("CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY is not configured");
+  }
+  const botPrivateKey = environment.BOT_PRIVATE_KEY?.trim();
+  if (botPrivateKey && botPrivateKey.toLowerCase() === privateKey.toLowerCase()) {
+    throw new Error(
+      "CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY must be separate from BOT_PRIVATE_KEY",
+    );
   }
   if (!CODE_HASH_PATTERN.test(campaignCodeHash)) {
     throw new Error("CAMPAIGN_CODE_HASH is invalid");

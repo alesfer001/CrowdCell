@@ -15,6 +15,7 @@ import { Select } from "@/components/Select";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
 import {
   listControlledVellumDids,
+  transactionUsesLockInput,
   vellumDidLabel,
   type ControlledVellumDid,
 } from "@/lib/vellum";
@@ -36,7 +37,7 @@ export default function CreateCampaignPage() {
   const router = useRouter();
   const { open } = ccc.useCcc();
   const walletSigner = ccc.useSigner();
-  const { isDevnet, devnetSigner } = useDevnet();
+  const { isDevnet, devnetSigner, network } = useDevnet();
   const { toast } = useToast();
 
   const signer = isDevnet ? devnetSigner : walletSigner;
@@ -78,7 +79,8 @@ export default function CreateCampaignPage() {
     setCreatorDid("");
     setControlledDids([]);
     setDidsError(null);
-    if (!signer) return;
+    setDidsLoading(false);
+    if (!signer || network !== "testnet") return;
 
     setDidsLoading(true);
     async function loadControlledDids() {
@@ -99,7 +101,7 @@ export default function CreateCampaignPage() {
     return () => {
       cancelled = true;
     };
-  }, [signer]);
+  }, [network, signer]);
 
   function validateCategory(): boolean {
     if (!CAMPAIGN_CATEGORIES.some((c) => c.slug === category)) {
@@ -262,6 +264,12 @@ export default function CreateCampaignPage() {
 
       await tx.completeInputsByCapacity(signer);
       await tx.completeFeeBy(signer, 1000);
+
+      if (creatorDid && !(await transactionUsesLockInput(client, tx, addressObj.script))) {
+        throw new Error(
+          "The selected Vellum identity controller must authorize a campaign creation input",
+        );
+      }
 
       console.log("Inputs:", tx.inputs.length, "Outputs:", tx.outputs.length);
       console.log("First input outpoint:", tx.inputs[0].previousOutput.txHash, tx.inputs[0].previousOutput.index);
@@ -456,13 +464,19 @@ export default function CreateCampaignPage() {
                 label: vellumDidLabel(identity),
               })),
             ]}
-            disabled={loading || didsLoading || !signer}
+            disabled={loading || didsLoading || !signer || network !== "testnet"}
             placeholder={didsLoading ? "Loading identities..." : "No Vellum identity"}
           />
           <div className="mt-1 text-sm text-ink-3">
-            {didsError ? (
+            {network !== "testnet" ? (
+              <p>Vellum identities are available when CrowdCell is running on CKB Testnet.</p>
+            ) : !signer ? (
+              <p>Connect a wallet to choose a Vellum identity.</p>
+            ) : didsLoading ? (
+              <p>Loading Vellum identities...</p>
+            ) : didsError ? (
               <p>Vellum identities are unavailable. You can create the campaign without one.</p>
-            ) : controlledDids.length === 0 && signer && !didsLoading ? (
+            ) : controlledDids.length === 0 ? (
               <p>
                 No controlled identity found.{" "}
                 <a
@@ -474,8 +488,10 @@ export default function CreateCampaignPage() {
                   Create a Vellum DID
                 </a>
               </p>
-            ) : (
+            ) : creatorDid ? (
               <p>The selected identity is committed to this campaign on-chain.</p>
+            ) : (
+              <p>Choose an identity to attach it to the campaign.</p>
             )}
           </div>
         </div>

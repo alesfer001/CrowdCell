@@ -7,6 +7,10 @@ import {
   type CampaignFundingEvidence,
 } from "./provenance";
 import {
+  hasCommittedCampaignClaim,
+  type CampaignClaimHistoryQuery,
+} from "./history";
+import {
   campaignFundedClaimNonce,
   CROWDCELL_CAMPAIGN_FUNDED_CLAIM_SCHEMA_HASH,
   parseCrowdcellCampaignFundedClaimPayload,
@@ -48,14 +52,20 @@ type ClaimWriter = (
   claimId: ccc.Hex;
   outputIndex: number;
 }>;
+type ClaimHistoryReader = (
+  client: ccc.Client,
+  query: CampaignClaimHistoryQuery,
+) => Promise<boolean>;
 
 export type CampaignClaimServiceDependencies = {
+  hasCommittedClaim: ClaimHistoryReader;
   readClaims: ClaimReader;
   reconstruct: typeof reconstructCampaignFunding;
   writeClaim: ClaimWriter;
 };
 
 const defaultDependencies: CampaignClaimServiceDependencies = {
+  hasCommittedClaim: hasCommittedCampaignClaim,
   readClaims: async (props) => {
     const { readClaims } = await import("@usevellum/sdk");
     return (readClaims as unknown as ClaimReader)(props);
@@ -182,7 +192,7 @@ export class CampaignClaimService {
         schemaHash: CROWDCELL_CAMPAIGN_FUNDED_CLAIM_SCHEMA_HASH,
       },
     });
-    return result.claims.some((claim) => {
+    const liveClaimExists = result.claims.some((claim) => {
       try {
         return (
           parseCrowdcellCampaignFundedClaimPayload(claim.payload)
@@ -191,6 +201,13 @@ export class CampaignClaimService {
       } catch {
         return false;
       }
+    });
+    if (liveClaimExists) return true;
+
+    return this.dependencies.hasCommittedClaim(this.client, {
+      campaignTypeId: evidence.payload.campaign_type_id,
+      issuerDid: this.config.issuerDid,
+      subjectDid: evidence.subjectDid,
     });
   }
 
