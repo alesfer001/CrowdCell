@@ -4,6 +4,7 @@ import { parseCampaignData, parsePledgeData, parseReceiptData } from "./parser";
 import { Database, DBCampaign, DBPledge, DBReceipt } from "./database";
 import { FinalizationBot } from "./bot";
 import { BackerPosition, ReceiptRecord } from "./wallet";
+import type { CampaignClaimService } from "./claims/service";
 
 /**
  * Create a network-aware CKB client
@@ -89,7 +90,9 @@ function createCkbClient(rpcUrl: string): ccc.Client {
           },
         ],
       },
+      [ccc.KnownScript.Secp256k1MultisigV2Beta]: undefined,
       [ccc.KnownScript.Secp256k1MultisigV2]: undefined,
+      [ccc.KnownScript.SUdt]: undefined,
       [ccc.KnownScript.XUdt]: undefined,
       [ccc.KnownScript.JoyId]: undefined,
       [ccc.KnownScript.COTA]: undefined,
@@ -97,6 +100,7 @@ function createCkbClient(rpcUrl: string): ccc.Client {
       [ccc.KnownScript.OmniLock]: undefined,
       [ccc.KnownScript.NostrLock]: undefined,
       [ccc.KnownScript.UniqueType]: undefined,
+      [ccc.KnownScript.DidCkb]: undefined,
       [ccc.KnownScript.AlwaysSuccess]: undefined,
       [ccc.KnownScript.InputTypeProxyLock]: undefined,
       [ccc.KnownScript.OutputTypeProxyLock]: undefined,
@@ -136,6 +140,7 @@ export class CampaignIndexer {
   private rpcUrl: string;
   private db: Database;
   private bot: FinalizationBot | null = null;
+  private claimIssuer: CampaignClaimService | null = null;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private pollInFlight = false;
   private campaignCodeHash: string = "";
@@ -169,6 +174,11 @@ export class CampaignIndexer {
   setBot(bot: FinalizationBot): void {
     this.bot = bot;
     console.log("Bot injected into indexer");
+  }
+
+  setClaimIssuer(claimIssuer: CampaignClaimService): void {
+    this.claimIssuer = claimIssuer;
+    console.log("Vellum campaign claim issuer injected into indexer");
   }
 
   /**
@@ -288,7 +298,10 @@ export class CampaignIndexer {
         // v1.2: resolve this for every campaign, not just finalized ones. The campaign
         // cell's out point moves on every pledge, and the creation tx hash is what pledges
         // and receipts are linked by.
-        const campaignTypeHash = ccc.Script.from(cell.cellOutput.type!).hash();
+        const campaignType = ccc.Script.from(cell.cellOutput.type!);
+        const campaignTypeHash = campaignType.hash();
+        const campaignTypeArgs = ccc.hexFrom(campaignType.args);
+        const campaignTypeId = `0x${campaignTypeArgs.slice(2, 66)}`;
         const originalTxHash = await this.getOriginalTxHash(cell.outPoint.txHash, campaignTypeHash);
 
         // Extract creator lock script by finding an output whose lock hash matches creatorLockHash.
@@ -337,6 +350,8 @@ export class CampaignIndexer {
           created_at: blockNumber.toString(),
           original_tx_hash: originalTxHash || null,
           category: data.category ?? null,
+          campaign_type_id: campaignTypeId,
+          creator_did: data.creatorDid ?? null,
         });
       } catch (error) {
         console.error("Error parsing campaign cell:", error);
@@ -511,6 +526,10 @@ export class CampaignIndexer {
           await this.bot.releaseSuccessfulPledges();
           await this.bot.refundFailedPledges();
         }
+
+        if (this.claimIssuer) {
+          await this.claimIssuer.processEligibleCampaigns();
+        }
       } catch (error) {
         console.error("Polling cycle error:", error);
       } finally {
@@ -558,6 +577,8 @@ export class CampaignIndexer {
       createdAt: BigInt(row.created_at),
       originalTxHash: row.original_tx_hash || undefined,
       category: row.category ?? undefined,
+      campaignTypeId: row.campaign_type_id || undefined,
+      creatorDid: row.creator_did || undefined,
       creatorLockScript: row.creator_lock_code_hash
         ? {
             codeHash: row.creator_lock_code_hash,

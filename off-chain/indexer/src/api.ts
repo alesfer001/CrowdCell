@@ -219,8 +219,10 @@ export class IndexerAPI {
       // Stable across the campaign's life; the campaign cell's out point is not.
       // Pledges record this as their campaign_id, which is how they stay linked.
       originalTxHash: c.originalTxHash || c.txHash,
+      campaignTypeId: c.campaignTypeId || null,
       creator: c.creatorLockHash,
       creatorLockScript: c.creatorLockScript || null,
+      creatorDid: c.creatorDid || null,
       title: c.title,
       description: c.description,
       category: categorySlug(c.category),

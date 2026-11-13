@@ -14,9 +14,13 @@ export interface Campaign {
    * Pledges record this as their campaign_id, which is how the indexer links them.
    */
   originalTxHash?: string;
+  /** Stable first 32 bytes of the campaign Type Script args */
+  campaignTypeId?: string | null;
   campaignId: string;
   creator: string;
   creatorLockScript?: CreatorLockScript | null;
+  /** Optional Vellum identity selected and committed at campaign creation */
+  creatorDid?: string | null;
   title?: string;
   description?: string;
   /** Category slug (see lib/categories.ts); null for campaigns created before categories */

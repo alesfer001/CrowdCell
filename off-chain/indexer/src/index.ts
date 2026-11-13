@@ -6,6 +6,9 @@ import { Database } from "./database";
 import { FinalizationBot } from "./bot";
 import { TransactionBuilder } from "../../transaction-builder/src/builder";
 import { createCkbClient } from "../../transaction-builder/src/ckbClient";
+import { loadCampaignClaimConfig } from "./claims/config";
+import { createCampaignClaimSigner } from "./claims/issuer";
+import { CampaignClaimService } from "./claims/service";
 
 /**
  * Main entry point for the indexer service
@@ -155,6 +158,29 @@ async function main() {
     console.log("BOT_PRIVATE_KEY not set — bot disabled");
   }
 
+  const campaignClaimConfig = loadCampaignClaimConfig(
+    process.env,
+    CAMPAIGN_CODE_HASH,
+  );
+  let campaignClaimIssuer: CampaignClaimService | null = null;
+  if (campaignClaimConfig) {
+    console.log("Initializing Vellum campaign claim issuer...");
+    const issuerSigner = await createCampaignClaimSigner(
+      indexer.getClient(),
+      campaignClaimConfig,
+    );
+    campaignClaimIssuer = new CampaignClaimService(
+      indexer.getClient(),
+      issuerSigner,
+      db,
+      campaignClaimConfig,
+    );
+    indexer.setClaimIssuer(campaignClaimIssuer);
+    console.log("Vellum campaign claim issuer initialized");
+  } else {
+    console.log("CrowdCell Vellum issuer settings not set — claim issuance disabled");
+  }
+
   // Create and start API server
   const api = new IndexerAPI(indexer);
   api.start(PORT);
@@ -164,6 +190,7 @@ async function main() {
   try {
     const result = await indexer.indexAll(CAMPAIGN_CODE_HASH, PLEDGE_CODE_HASH, RECEIPT_CODE_HASH || undefined, PLEDGE_LOCK_CODE_HASH || undefined);
     console.log(`Indexed ${result.campaigns} campaigns, ${result.pledges} pledges, and ${result.receipts} receipts`);
+    await campaignClaimIssuer?.processEligibleCampaigns();
   } catch (error) {
     console.error("Error during initial indexing:", error);
   }

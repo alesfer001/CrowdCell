@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ccc } from "@ckb-ccc/connector-react";
-import { Campaign, Pledge, CampaignStatus, Receipt, PledgeDistributionStatus, IndexerPhase } from "@/lib/types";
+import { Campaign, Pledge, CampaignStatus, Receipt, IndexerPhase } from "@/lib/types";
 import { fetchCampaign, fetchPledgesForCampaign, fetchBlockNumber, fetchReceiptsForCampaign } from "@/lib/api";
 import {
   shannonsToCKB,
@@ -27,7 +27,6 @@ import { categoryLabel } from "@/lib/categories";
 import { CONTRACTS, MIN_PLEDGE_CKB, PLEDGE_CELL_OVERHEAD, RECEIPT_CELL_CAPACITY, EXPLORER_URL, GRACE_PERIOD_BLOCKS } from "@/lib/constants";
 import {
   u64ToHexLE,
-  serializeMetadataHex,
   readTotalPledged,
   withTotalPledged,
   receiptTypeArgs,
@@ -39,6 +38,7 @@ import { useToast } from "@/components/Toast";
 import { SkeletonDetailPage } from "@/components/Skeleton";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
 import { useCellNames } from "@/components/CellName";
+import { VellumIdentityLink } from "@/components/VellumIdentityLink";
 
 type PledgeSortMode = "recent" | "amount";
 
@@ -918,6 +918,13 @@ export default function CampaignDetailPage() {
                 )}
                 <p className="font-mono text-sm break-all">{campaign.creator}</p>
               </div>
+
+              {campaign.creatorDid && (
+                <div>
+                  <p className="text-sm text-ink-3 mb-1">Vellum identity</p>
+                  <VellumIdentityLink did={campaign.creatorDid} />
+                </div>
+              )}
 
               <div>
                 <p className="text-sm text-ink-3 mb-1">Transaction</p>

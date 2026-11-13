@@ -1,4 +1,7 @@
 import { CampaignParams, CampaignStatus, PledgeParams } from "./types";
+import { argsToDid, didToArgs, isDidCkb } from "@ckb-ccc/did-ckb";
+
+const DID_EXTENSION_PREFIX = "44494401";
 
 /**
  * Convert u64 bigint to little-endian hex string (16 chars)
@@ -32,11 +35,17 @@ export function encodeDeadlineBlockAsLockArgs(deadlineBlock: bigint | number): s
 }
 
 /**
- * Serialize campaign metadata (title + description + optional category) to hex string.
+ * Serialize campaign metadata (title + description + optional category and creator DID) to hex.
  * Layout: title_len (u16 LE) + title (UTF-8) + description_len (u16 LE) + description (UTF-8)
  *         + category (u8, optional; codes in off-chain/indexer/src/categories.ts)
+ *         + "DID" + version (4 bytes) + did_len (u8) + canonical did:ckb UTF-8 (optional)
  */
-export function serializeMetadata(title?: string, description?: string, category?: number): string {
+export function serializeMetadata(
+  title?: string,
+  description?: string,
+  category?: number,
+  creatorDid?: string,
+): string {
   const titleBytes = new TextEncoder().encode(title || "");
   const descBytes = new TextEncoder().encode(description || "");
 
@@ -54,17 +63,39 @@ export function serializeMetadata(title?: string, description?: string, category
     }
     hex += category.toString(16).padStart(2, "0");
   }
+  if (creatorDid !== undefined) {
+    if (category === undefined) {
+      throw new Error("A campaign creator DID requires a category byte");
+    }
+    if (!isDidCkb(creatorDid) || argsToDid(didToArgs(creatorDid)) !== creatorDid) {
+      throw new Error("Campaign creator DID must be a canonical did:ckb identifier");
+    }
+    const didBytes = new TextEncoder().encode(creatorDid);
+    if (didBytes.length > 255) {
+      throw new Error("Campaign creator DID is too long");
+    }
+    hex += DID_EXTENSION_PREFIX + didBytes.length.toString(16).padStart(2, "0");
+    for (const byte of didBytes) {
+      hex += byte.toString(16).padStart(2, "0");
+    }
+  }
   return hex;
 }
 
 /**
  * Get the total byte size of serialized metadata
  */
-export function getMetadataSize(title?: string, description?: string, category?: number): number {
+export function getMetadataSize(
+  title?: string,
+  description?: string,
+  category?: number,
+  creatorDid?: string,
+): number {
   const titleLen = new TextEncoder().encode(title || "").length;
   const descLen = new TextEncoder().encode(description || "").length;
-  // u16 + title + u16 + description (+ category byte)
-  return 2 + titleLen + 2 + descLen + (category !== undefined ? 1 : 0);
+  const didLen = creatorDid === undefined ? 0 : 5 + new TextEncoder().encode(creatorDid).length;
+  // u16 + title + u16 + description (+ category byte) (+ DID marker, length, and bytes)
+  return 2 + titleLen + 2 + descLen + (category !== undefined ? 1 : 0) + didLen;
 }
 
 /**
@@ -80,6 +111,7 @@ export function getMetadataSize(title?: string, description?: string, category?:
  *   - title_len: u16 LE          + title: [u8; title_len]
  *   - description_len: u16 LE    + description: [u8; description_len]
  *   - category: u8 (optional)
+ *   - creator_did: versioned, length-prefixed UTF-8 extension (optional)
  */
 export function serializeCampaignData(params: CampaignParams): string {
   const creatorHash = params.creatorLockHash.startsWith("0x")
@@ -95,8 +127,13 @@ export function serializeCampaignData(params: CampaignParams): string {
   let hex = creatorHash + fundingGoal + deadlineBlock + totalPledged + status + reserved;
 
   // Append metadata if provided
-  if (params.title || params.description || params.category !== undefined) {
-    hex += serializeMetadata(params.title, params.description, params.category);
+  if (params.title || params.description || params.category !== undefined || params.creatorDid) {
+    hex += serializeMetadata(
+      params.title,
+      params.description,
+      params.category,
+      params.creatorDid,
+    );
   }
 
   return "0x" + hex;

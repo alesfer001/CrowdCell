@@ -89,7 +89,9 @@ const OFFCKB_DEVNET_SCRIPTS: Record<ccc.KnownScript, ccc.ScriptInfoLike | undefi
     ],
   },
   // Not available on devnet
+  [ccc.KnownScript.Secp256k1MultisigV2Beta]: undefined,
   [ccc.KnownScript.Secp256k1MultisigV2]: undefined,
+  [ccc.KnownScript.SUdt]: undefined,
   [ccc.KnownScript.XUdt]: undefined,
   [ccc.KnownScript.JoyId]: undefined,
   [ccc.KnownScript.COTA]: undefined,
@@ -97,6 +99,7 @@ const OFFCKB_DEVNET_SCRIPTS: Record<ccc.KnownScript, ccc.ScriptInfoLike | undefi
   [ccc.KnownScript.OmniLock]: undefined,
   [ccc.KnownScript.NostrLock]: undefined,
   [ccc.KnownScript.UniqueType]: undefined,
+  [ccc.KnownScript.DidCkb]: undefined,
   [ccc.KnownScript.AlwaysSuccess]: undefined,
   [ccc.KnownScript.InputTypeProxyLock]: undefined,
   [ccc.KnownScript.OutputTypeProxyLock]: undefined,

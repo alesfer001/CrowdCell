@@ -3,6 +3,10 @@
  * Used by both campaign creation and finalization flows.
  */
 
+import { argsToDid, didToArgs, isDidCkb } from "@ckb-ccc/did-ckb";
+
+const DID_EXTENSION_PREFIX = "44494401";
+
 /**
  * Receipt type script args: pledge code hash + pledge-lock code hash (64 bytes).
  * Throws on anything but two 32-byte hashes, since malformed args only fail on-chain.
@@ -33,9 +37,14 @@ export function u16ToHexLE(value: number): string {
 
 /**
  * Serialize metadata to hex: title_len (u16 LE) + title + description_len (u16 LE) + description,
- * then the category byte when one is given.
+ * then the category byte and optional versioned creator DID extension.
  */
-export function serializeMetadataHex(title: string, description: string, categoryCode?: number): string {
+export function serializeMetadataHex(
+  title: string,
+  description: string,
+  categoryCode?: number,
+  creatorDid?: string,
+): string {
   const titleBytes = new TextEncoder().encode(title);
   const descBytes = new TextEncoder().encode(description);
 
@@ -52,6 +61,22 @@ export function serializeMetadataHex(title: string, description: string, categor
       throw new Error(`Invalid campaign category: ${categoryCode}`);
     }
     hex += categoryCode.toString(16).padStart(2, "0");
+  }
+  if (creatorDid !== undefined) {
+    if (categoryCode === undefined) {
+      throw new Error("A campaign creator DID requires a category byte");
+    }
+    if (!isDidCkb(creatorDid) || argsToDid(didToArgs(creatorDid)) !== creatorDid) {
+      throw new Error("Campaign creator DID must be a canonical did:ckb identifier");
+    }
+    const didBytes = new TextEncoder().encode(creatorDid);
+    if (didBytes.length > 255) {
+      throw new Error("Campaign creator DID is too long");
+    }
+    hex += DID_EXTENSION_PREFIX + didBytes.length.toString(16).padStart(2, "0");
+    for (const byte of didBytes) {
+      hex += byte.toString(16).padStart(2, "0");
+    }
   }
   return hex;
 }
