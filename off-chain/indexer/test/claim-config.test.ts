@@ -29,6 +29,21 @@ test("claim issuer accepts complete Testnet settings and defaults to six confirm
   assert.equal(config?.campaignHashType, "data2");
 });
 
+test("claim issuer treats blank optional settings as defaults", () => {
+  const config = loadCampaignClaimConfig(
+    {
+      CKB_NETWORK: "testnet",
+      CONTRACT_HASH_TYPE: "  ",
+      CROWDCELL_VELLUM_ISSUER_DID: issuerDid,
+      CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY: privateKey,
+      CROWDCELL_VELLUM_MIN_CONFIRMATIONS: "",
+    },
+    campaignCodeHash,
+  );
+  assert.equal(config?.campaignHashType, "data2");
+  assert.equal(config?.minConfirmations, 6);
+});
+
 test("claim issuer rejects reuse of the finalization bot credential", () => {
   assert.throws(
     () =>

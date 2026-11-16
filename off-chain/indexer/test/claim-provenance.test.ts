@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { ccc } from "@ckb-ccc/core";
 import { argsToDid, didToArgs, type DidCkbRecord } from "@ckb-ccc/did-ckb";
 import type { CampaignClaimConfig } from "../src/claims/config";
-import { reconstructCampaignFunding } from "../src/claims/provenance";
+import {
+  reconstructCampaignFunding,
+  verifyCampaignCreatorDid,
+} from "../src/claims/provenance";
 import type { DBCampaign } from "../src/database";
 import { CampaignStatus } from "../src/types";
 import {
@@ -28,12 +31,14 @@ function script(byte: string, argsBytes = 20): ccc.Script {
 
 type FixtureOptions = {
   authorized?: boolean;
+  campaignTitle?: string;
   indexedCreationIsIntermediate?: boolean;
   rotateDid?: boolean;
 };
 
 function fixture(options: FixtureOptions = {}) {
   const authorized = options.authorized ?? true;
+  const campaignTitle = options.campaignTitle ?? "Community solar";
   const historicalController = script("55");
   const currentController = options.rotateDid ? script("56") : historicalController;
   const unrelatedController = script("57");
@@ -70,7 +75,7 @@ function fixture(options: FixtureOptions = {}) {
     creatorLockHash: historicalController.hash(),
     fundingGoal: 100_000_000_000n,
     deadlineBlock: 1_000n,
-    title: "Community solar",
+    title: campaignTitle,
     description: "Panels for the local hall",
     category: 5,
     creatorDid: subjectDid,
@@ -178,7 +183,7 @@ function fixture(options: FixtureOptions = {}) {
     deadline_block: "1000",
     total_pledged: "125000000000",
     status: CampaignStatus.Success,
-    title: "Community solar",
+    title: campaignTitle,
     description: "Panels for the local hall",
     created_at: "100",
     original_tx_hash: intermediateTx?.hash() ?? campaignCreationTxHash,
@@ -194,8 +199,45 @@ function fixture(options: FixtureOptions = {}) {
     issuerPrivateKey: `0x${"75".repeat(32)}`,
     minConfirmations: 6,
   };
-  return { campaign, client, config, identity, finalizationTxHash };
+  return {
+    campaign,
+    campaignCreationTxHash,
+    client,
+    config,
+    identity,
+    finalizationTxHash,
+  };
 }
+
+test("verifies the displayed DID against the campaign creator", async () => {
+  const authorized = fixture({ rotateDid: true });
+  assert.equal(
+    await verifyCampaignCreatorDid(
+      authorized.client,
+      {
+        creatorDid: subjectDid,
+        creatorLockHash: authorized.campaign.creator_lock_hash,
+        creationTxHash: authorized.campaignCreationTxHash,
+      },
+      { resolveDid: async () => authorized.identity },
+    ),
+    true,
+  );
+
+  const forged = fixture({ authorized: false });
+  assert.equal(
+    await verifyCampaignCreatorDid(
+      forged.client,
+      {
+        creatorDid: subjectDid,
+        creatorLockHash: forged.campaign.creator_lock_hash,
+        creationTxHash: forged.campaignCreationTxHash,
+      },
+      { resolveDid: async () => forged.identity },
+    ),
+    false,
+  );
+});
 
 test("reconstructs confirmed funding from campaign and DID histories", async () => {
   const value = fixture({ rotateDid: true });
@@ -210,6 +252,17 @@ test("reconstructs confirmed funding from campaign and DID histories", async () 
   assert.equal(evidence.payload.finalization_tx_hash, value.finalizationTxHash);
   assert.equal(evidence.payload.total_pledged, "125000000000");
   assert.equal(evidence.issuedAt, 2_000_000_000);
+});
+
+test("trims the campaign title in the claim payload", async () => {
+  const value = fixture({ campaignTitle: "  Community solar  " });
+  const evidence = await reconstructCampaignFunding(
+    value.client,
+    value.campaign,
+    value.config,
+    { resolveDid: async () => value.identity },
+  );
+  assert.equal(evidence.payload.campaign_title, "Community solar");
 });
 
 test("rejects a creation transaction without an input from the historical DID controller", async () => {

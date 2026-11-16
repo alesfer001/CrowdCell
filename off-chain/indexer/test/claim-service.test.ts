@@ -59,6 +59,7 @@ function serviceFixture(
   existingPayload?: unknown,
   options: {
     campaigns?: DBCampaign[];
+    failSendAttempts?: number[];
     historicalClaim?: boolean;
     mutateSignedTransaction?: boolean;
     onReconstructStart?: () => void;
@@ -77,6 +78,9 @@ function serviceFixture(
         : undefined,
     sendTransaction: async () => {
       sends += 1;
+      if (options.failSendAttempts?.includes(sends)) {
+        throw new Error("transaction rejected by the node");
+      }
       return transaction.hash();
     },
   } as unknown as ccc.Client;
@@ -140,15 +144,28 @@ test("claim service prepares one transaction and waits for its pending result", 
 });
 
 test("claim service skips a campaign already claimed by the configured issuer", async () => {
-  const fixture = serviceFixture(evidence.payload);
+  let reconstructed = false;
+  const fixture = serviceFixture(evidence.payload, {
+    onReconstructStart: () => {
+      reconstructed = true;
+    },
+  });
   await fixture.service.processEligibleCampaigns();
   assert.deepEqual(fixture.counts(), { sends: 0, writes: 0 });
+  assert.equal(reconstructed, false);
 });
 
 test("claim service recovers a spent claim from committed chain history", async () => {
-  const fixture = serviceFixture(undefined, { historicalClaim: true });
+  let reconstructed = false;
+  const fixture = serviceFixture(undefined, {
+    historicalClaim: true,
+    onReconstructStart: () => {
+      reconstructed = true;
+    },
+  });
   await fixture.service.processEligibleCampaigns();
   assert.deepEqual(fixture.counts(), { sends: 0, writes: 0 });
+  assert.equal(reconstructed, false);
 });
 
 test("claim service ignores malformed unrelated payloads instead of suppressing issuance", async () => {
@@ -207,6 +224,27 @@ test("claim service rebroadcasts the same prepared transaction after unknown sta
   }
 
   assert.deepEqual(fixture.counts(), { sends: 2, writes: 1 });
+});
+
+test("claim service rebuilds after initial submission fails", async () => {
+  const fixture = serviceFixture(undefined, { failSendAttempts: [1] });
+
+  await fixture.service.processEligibleCampaigns();
+  await fixture.service.processEligibleCampaigns();
+
+  assert.deepEqual(fixture.counts(), { sends: 2, writes: 2 });
+});
+
+test("claim service rebuilds after rebroadcast fails", async () => {
+  const fixture = serviceFixture(undefined, { failSendAttempts: [2] });
+  await fixture.service.processEligibleCampaigns();
+
+  for (let cycle = 0; cycle < 6; cycle += 1) {
+    await fixture.service.processEligibleCampaigns();
+  }
+  await fixture.service.processEligibleCampaigns();
+
+  assert.deepEqual(fixture.counts(), { sends: 3, writes: 2 });
 });
 
 test("claim service ignores active and failed campaigns", async () => {

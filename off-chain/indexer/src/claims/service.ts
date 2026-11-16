@@ -2,10 +2,7 @@ import { ccc } from "@ckb-ccc/core";
 import type { Database, DBCampaign } from "../database";
 import { CampaignStatus } from "../types";
 import { campaignClaimScripts, type CampaignClaimConfig } from "./config";
-import {
-  reconstructCampaignFunding,
-  type CampaignFundingEvidence,
-} from "./provenance";
+import { reconstructCampaignFunding } from "./provenance";
 import {
   hasCommittedCampaignClaim,
   type CampaignClaimHistoryQuery,
@@ -88,6 +85,7 @@ function campaignKey(campaign: DBCampaign): string {
 export class CampaignClaimService {
   private processing = false;
   private readonly pending = new Map<string, PendingClaim>();
+  private pollingTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly client: ccc.Client,
@@ -96,6 +94,23 @@ export class CampaignClaimService {
     private readonly config: CampaignClaimConfig,
     private readonly dependencies: CampaignClaimServiceDependencies = defaultDependencies,
   ) {}
+
+  start(intervalMs: number): void {
+    this.stop();
+    const process = () => {
+      void this.processEligibleCampaigns().catch((error) => {
+        console.error("Vellum claim processing failed:", error);
+      });
+    };
+    process();
+    this.pollingTimer = setInterval(process, intervalMs);
+  }
+
+  stop(): void {
+    if (!this.pollingTimer) return;
+    clearInterval(this.pollingTimer);
+    this.pollingTimer = null;
+  }
 
   async processEligibleCampaigns(): Promise<void> {
     if (this.processing) return;
@@ -138,12 +153,12 @@ export class CampaignClaimService {
     const pending = this.pending.get(key);
     if (pending && (await this.handlePending(key, pending))) return;
 
+    if (await this.hasExistingClaim(campaign)) return;
     const evidence = await this.dependencies.reconstruct(
       this.client,
       campaign,
       this.config,
     );
-    if (await this.hasExistingClaim(evidence)) return;
 
     const built = await this.dependencies.writeClaim({
       issuerSigner: this.signer,
@@ -170,24 +185,26 @@ export class CampaignClaimService {
       transaction: signed,
       transactionHash,
     };
-    this.pending.set(key, submitted);
     const returnedHash = await this.client.sendTransaction(signed);
     if (normalizeHex(returnedHash) !== normalizeHex(transactionHash)) {
       throw new Error("CKB node returned an unexpected claim transaction hash");
     }
+    this.pending.set(key, submitted);
     console.log(
       `Submitted Vellum campaign claim ${built.claimId} at ${transactionHash}:${built.outputIndex}`,
     );
   }
 
   private async hasExistingClaim(
-    evidence: CampaignFundingEvidence,
+    campaign: DBCampaign,
   ): Promise<boolean> {
+    if (!campaign.creator_did || !campaign.campaign_type_id) return false;
+    const campaignTypeId = normalizeHex(campaign.campaign_type_id);
     const result = await this.dependencies.readClaims({
       client: this.client,
       scripts: campaignClaimScripts,
       filter: {
-        subject: { did: evidence.subjectDid },
+        subject: { did: campaign.creator_did },
         issuerDid: this.config.issuerDid,
         schemaHash: CROWDCELL_CAMPAIGN_FUNDED_CLAIM_SCHEMA_HASH,
       },
@@ -196,7 +213,7 @@ export class CampaignClaimService {
       try {
         return (
           parseCrowdcellCampaignFundedClaimPayload(claim.payload)
-            .campaign_type_id === evidence.payload.campaign_type_id
+            .campaign_type_id === campaignTypeId
         );
       } catch {
         return false;
@@ -205,9 +222,9 @@ export class CampaignClaimService {
     if (liveClaimExists) return true;
 
     return this.dependencies.hasCommittedClaim(this.client, {
-      campaignTypeId: evidence.payload.campaign_type_id,
+      campaignTypeId,
       issuerDid: this.config.issuerDid,
-      subjectDid: evidence.subjectDid,
+      subjectDid: campaign.creator_did,
     });
   }
 
@@ -234,9 +251,14 @@ export class CampaignClaimService {
     pending.rebroadcastCycle += 1;
     if (pending.rebroadcastCycle >= 6) {
       pending.rebroadcastCycle = 0;
-      const returnedHash = await this.client.sendTransaction(pending.transaction);
-      if (normalizeHex(returnedHash) !== pending.transactionHash) {
-        throw new Error("CKB node returned an unexpected claim transaction hash");
+      try {
+        const returnedHash = await this.client.sendTransaction(pending.transaction);
+        if (normalizeHex(returnedHash) !== pending.transactionHash) {
+          throw new Error("CKB node returned an unexpected claim transaction hash");
+        }
+      } catch (error) {
+        this.pending.delete(key);
+        throw error;
       }
     }
     return true;

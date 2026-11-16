@@ -200,6 +200,53 @@ async function transactionHasInputLock(
   return false;
 }
 
+async function didAuthorizedCampaignCreation(
+  client: ccc.Client,
+  identity: DidCkbRecord,
+  creation: ccc.ClientTransactionResponse,
+  creatorLockHash: ccc.HexLike,
+  cache: TransactionCache,
+): Promise<boolean> {
+  const controller = await didControllerAt(
+    client,
+    identity,
+    transactionPosition(creation, "Campaign creation"),
+    cache,
+  );
+  const controllerHash = normalizeHex(controller.hash());
+  if (controllerHash !== normalizeHex(creatorLockHash)) return false;
+  return transactionHasInputLock(client, creation, controllerHash, cache);
+}
+
+export async function verifyCampaignCreatorDid(
+  client: ccc.Client,
+  input: {
+    creatorDid: string;
+    creatorLockHash: ccc.HexLike;
+    creationTxHash: ccc.HexLike;
+  },
+  dependencies: CampaignProvenanceDependencies = defaultDependencies,
+): Promise<boolean> {
+  const cache: TransactionCache = new Map();
+  const creation = await committedTransaction(
+    client,
+    input.creationTxHash,
+    cache,
+  );
+  const identity = await dependencies.resolveDid({
+    client,
+    did: input.creatorDid,
+  });
+  if (!identity) return false;
+  return didAuthorizedCampaignCreation(
+    client,
+    identity,
+    creation,
+    input.creatorLockHash,
+    cache,
+  );
+}
+
 function campaignTypeFromOutput(
   output: ccc.CellOutput,
   campaignTypeId: ccc.Hex,
@@ -298,17 +345,13 @@ export async function reconstructCampaignFunding(
     did: campaign.creator_did,
   });
   if (!identity) throw new Error("Campaign creator DID is not active");
-  const controller = await didControllerAt(
+  if (!(await didAuthorizedCampaignCreation(
     client,
     identity,
-    transactionPosition(creation.response, "Campaign creation"),
+    creation.response,
+    creationData.creatorLockHash,
     cache,
-  );
-  const controllerHash = normalizeHex(controller.hash());
-  if (
-    controllerHash !== normalizeHex(creationData.creatorLockHash) ||
-    !(await transactionHasInputLock(client, creation.response, controllerHash, cache))
-  ) {
+  ))) {
     throw new Error("Campaign creation was not authorized by the selected DID controller");
   }
 
@@ -335,7 +378,7 @@ export async function reconstructCampaignFunding(
     issuedAt: fundedAt,
     payload: parseCrowdcellCampaignFundedClaimPayload({
       campaign_type_id: campaignTypeId,
-      campaign_title: finalData.title,
+      campaign_title: finalData.title?.trim(),
       campaign_creation_tx_hash: creationTxHash,
       finalization_tx_hash: finalizationTxHash,
       funding_goal: finalData.fundingGoal.toString(),

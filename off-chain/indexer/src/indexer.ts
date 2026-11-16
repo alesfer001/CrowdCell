@@ -4,7 +4,7 @@ import { parseCampaignData, parsePledgeData, parseReceiptData } from "./parser";
 import { Database, DBCampaign, DBPledge, DBReceipt } from "./database";
 import { FinalizationBot } from "./bot";
 import { BackerPosition, ReceiptRecord } from "./wallet";
-import type { CampaignClaimService } from "./claims/service";
+import { verifyCampaignCreatorDid } from "./claims/provenance";
 
 /**
  * Create a network-aware CKB client
@@ -140,7 +140,6 @@ export class CampaignIndexer {
   private rpcUrl: string;
   private db: Database;
   private bot: FinalizationBot | null = null;
-  private claimIssuer: CampaignClaimService | null = null;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private pollInFlight = false;
   private campaignCodeHash: string = "";
@@ -152,6 +151,7 @@ export class CampaignIndexer {
   private receiptHistory = new Map<string, ReceiptRecord[]>();
   /** Receipt outputs already folded into backerHistory and receiptHistory ("txHash_index") */
   private seenReceiptOutputs = new Set<string>();
+  private verifiedCreatorDids = new Set<string>();
   private pledgeLockCodeHash: string = "";
   private initialSyncComplete = false;
 
@@ -174,11 +174,6 @@ export class CampaignIndexer {
   setBot(bot: FinalizationBot): void {
     this.bot = bot;
     console.log("Bot injected into indexer");
-  }
-
-  setClaimIssuer(claimIssuer: CampaignClaimService): void {
-    this.claimIssuer = claimIssuer;
-    console.log("Vellum campaign claim issuer injected into indexer");
   }
 
   /**
@@ -304,6 +299,39 @@ export class CampaignIndexer {
         const campaignTypeId = `0x${campaignTypeArgs.slice(2, 66)}`;
         const originalTxHash = await this.getOriginalTxHash(cell.outPoint.txHash, campaignTypeHash);
 
+        let creatorDid: string | null = null;
+        if (data.creatorDid && originalTxHash) {
+          const verificationKey = [
+            campaignTypeId,
+            data.creatorDid,
+            data.creatorLockHash,
+            originalTxHash,
+          ].join(":");
+          let verified = this.verifiedCreatorDids.has(verificationKey);
+          if (!verified) {
+            try {
+              verified = await verifyCampaignCreatorDid(this.client, {
+                creatorDid: data.creatorDid,
+                creatorLockHash: data.creatorLockHash,
+                creationTxHash: originalTxHash,
+              });
+              if (verified) {
+                this.verifiedCreatorDids.add(verificationKey);
+              } else {
+                console.warn(
+                  `Ignoring unverified creator DID for campaign ${campaignTypeId}`,
+                );
+              }
+            } catch (error) {
+              console.warn(
+                `Failed to verify creator DID for campaign ${campaignTypeId}:`,
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+          }
+          if (verified) creatorDid = data.creatorDid;
+        }
+
         // Extract creator lock script by finding an output whose lock hash matches creatorLockHash.
         // For finalized campaigns, the creator's lock is only in the original creation tx
         // (the finalization tx may be built by a non-creator), so use originalTxHash if available.
@@ -351,7 +379,7 @@ export class CampaignIndexer {
           original_tx_hash: originalTxHash || null,
           category: data.category ?? null,
           campaign_type_id: campaignTypeId,
-          creator_did: data.creatorDid ?? null,
+          creator_did: creatorDid,
         });
       } catch (error) {
         console.error("Error parsing campaign cell:", error);
@@ -525,10 +553,6 @@ export class CampaignIndexer {
           await this.bot.processPendingFinalizations();
           await this.bot.releaseSuccessfulPledges();
           await this.bot.refundFailedPledges();
-        }
-
-        if (this.claimIssuer) {
-          await this.claimIssuer.processEligibleCampaigns();
         }
       } catch (error) {
         console.error("Polling cycle error:", error);

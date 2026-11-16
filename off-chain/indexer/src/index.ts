@@ -158,27 +158,33 @@ async function main() {
     console.log("BOT_PRIVATE_KEY not set — bot disabled");
   }
 
-  const campaignClaimConfig = loadCampaignClaimConfig(
-    process.env,
-    CAMPAIGN_CODE_HASH,
-  );
   let campaignClaimIssuer: CampaignClaimService | null = null;
-  if (campaignClaimConfig) {
-    console.log("Initializing Vellum campaign claim issuer...");
-    const issuerSigner = await createCampaignClaimSigner(
-      indexer.getClient(),
-      campaignClaimConfig,
+  try {
+    const campaignClaimConfig = loadCampaignClaimConfig(
+      process.env,
+      CAMPAIGN_CODE_HASH,
     );
-    campaignClaimIssuer = new CampaignClaimService(
-      indexer.getClient(),
-      issuerSigner,
-      db,
-      campaignClaimConfig,
+    if (campaignClaimConfig) {
+      console.log("Initializing Vellum campaign claim issuer...");
+      const issuerSigner = await createCampaignClaimSigner(
+        indexer.getClient(),
+        campaignClaimConfig,
+      );
+      campaignClaimIssuer = new CampaignClaimService(
+        indexer.getClient(),
+        issuerSigner,
+        db,
+        campaignClaimConfig,
+      );
+      console.log("Vellum campaign claim issuer initialized");
+    } else {
+      console.log("CrowdCell Vellum issuer settings not set — claim issuance disabled");
+    }
+  } catch (error) {
+    console.error(
+      "Failed to initialize Vellum campaign claims (continuing without claims):",
+      error,
     );
-    indexer.setClaimIssuer(campaignClaimIssuer);
-    console.log("Vellum campaign claim issuer initialized");
-  } else {
-    console.log("CrowdCell Vellum issuer settings not set — claim issuance disabled");
   }
 
   // Create and start API server
@@ -190,13 +196,13 @@ async function main() {
   try {
     const result = await indexer.indexAll(CAMPAIGN_CODE_HASH, PLEDGE_CODE_HASH, RECEIPT_CODE_HASH || undefined, PLEDGE_LOCK_CODE_HASH || undefined);
     console.log(`Indexed ${result.campaigns} campaigns, ${result.pledges} pledges, and ${result.receipts} receipts`);
-    await campaignClaimIssuer?.processEligibleCampaigns();
   } catch (error) {
     console.error("Error during initial indexing:", error);
   }
 
   // Start background polling
   indexer.startBackgroundIndexing(CAMPAIGN_CODE_HASH, PLEDGE_CODE_HASH, POLL_INTERVAL, RECEIPT_CODE_HASH || undefined, PLEDGE_LOCK_CODE_HASH || undefined);
+  campaignClaimIssuer?.start(POLL_INTERVAL);
 
   console.log("\nIndexer is ready!");
   console.log(`API available at http://localhost:${PORT}`);
@@ -205,6 +211,7 @@ async function main() {
   // Graceful shutdown handler
   function shutdown() {
     console.log("\nShutting down indexer...");
+    campaignClaimIssuer?.stop();
     indexer.stopBackgroundIndexing();
     api.stop();
     db.close();

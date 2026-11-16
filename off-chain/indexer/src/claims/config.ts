@@ -54,7 +54,9 @@ export type CampaignClaimConfig = {
 };
 
 function requiredConfirmations(environment: CampaignClaimEnvironment): number {
-  const value = Number(environment.CROWDCELL_VELLUM_MIN_CONFIRMATIONS ?? 6);
+  const value = Number(
+    environment.CROWDCELL_VELLUM_MIN_CONFIRMATIONS?.trim() || "6",
+  );
   if (!Number.isInteger(value) || value < 1 || value > 100) {
     throw new Error(
       "CROWDCELL_VELLUM_MIN_CONFIRMATIONS must be between 1 and 100",
@@ -64,7 +66,7 @@ function requiredConfirmations(environment: CampaignClaimEnvironment): number {
 }
 
 function campaignHashType(environment: CampaignClaimEnvironment): ccc.HashType {
-  const value = environment.CONTRACT_HASH_TYPE ?? "data2";
+  const value = environment.CONTRACT_HASH_TYPE?.trim() || "data2";
   if (!["data", "data1", "data2", "type"].includes(value)) {
     throw new Error("CONTRACT_HASH_TYPE is invalid");
   }
