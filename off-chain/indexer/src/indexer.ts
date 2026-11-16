@@ -481,7 +481,8 @@ export class CampaignIndexer {
     pledgeCodeHash: string,
     intervalMs: number = 10000,
     receiptCodeHash?: string,
-    pledgeLockCodeHash?: string
+    pledgeLockCodeHash?: string,
+    runFirstCycleNow: boolean = false
   ) {
     this.campaignCodeHash = campaignCodeHash;
     this.pledgeCodeHash = pledgeCodeHash;
@@ -492,33 +493,42 @@ export class CampaignIndexer {
       clearInterval(this.pollingTimer);
     }
 
-    this.pollingTimer = setInterval(async () => {
+    const tick = async () => {
       // A slow cycle (RPC latency, bot transactions) must not overlap the next one
       if (this.pollInFlight) return;
       this.pollInFlight = true;
       try {
-        // 1. Index all campaigns/pledges from CKB
-        await this.indexAll(
-          this.campaignCodeHash,
-          this.pledgeCodeHash,
-          this.receiptCodeHash || undefined,
-          this.pledgeLockCodeHash || undefined
-        );
-
-        // 2. (NEW) Run bot finalization checks
-        if (this.bot) {
-          await this.bot.processPendingFinalizations();
-          await this.bot.releaseSuccessfulPledges();
-          await this.bot.refundFailedPledges();
-        }
+        await this.runCycle();
       } catch (error) {
         console.error("Polling cycle error:", error);
       } finally {
         this.pollInFlight = false;
       }
-    }, intervalMs);
+    };
+
+    this.pollingTimer = setInterval(tick, intervalMs);
+    if (runFirstCycleNow) void tick();
 
     console.log(`Background indexing started (every ${intervalMs / 1000}s)`);
+  }
+
+  /**
+   * One poll cycle: index all campaigns/pledges from CKB, then run the bot if there is one.
+   * Uses the code hashes passed to startBackgroundIndexing.
+   */
+  async runCycle(): Promise<void> {
+    await this.indexAll(
+      this.campaignCodeHash,
+      this.pledgeCodeHash,
+      this.receiptCodeHash || undefined,
+      this.pledgeLockCodeHash || undefined
+    );
+
+    if (this.bot) {
+      await this.bot.processPendingFinalizations();
+      await this.bot.releaseSuccessfulPledges();
+      await this.bot.refundFailedPledges();
+    }
   }
 
   /**

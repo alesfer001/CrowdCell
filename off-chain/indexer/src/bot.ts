@@ -88,6 +88,11 @@ export class FinalizationBot {
       // Check bot balance first
       await this.checkBotBalance();
 
+      // Forget in-flight release/refund txs whose pledge is gone or that the node dropped.
+      // Runs every cycle: before, it only ran after a finalization, so a dropped tx could
+      // block its pledge until restart.
+      await this.cleanupInFlightTxs();
+
       // Scan for expired campaigns needing finalization
       const currentBlock = await this.getCurrentBlockNumber();
       const campaignsToFinalize = this.findExpiredCampaigns(currentBlock);
@@ -105,9 +110,6 @@ export class FinalizationBot {
 
       // After finalization, process pledges for release/refund in subsequent cycles
       // This happens naturally as the polling loop continues (D-04)
-
-      // Clean up in-flight tx tracking for pledges that no longer exist
-      this.cleanupInFlightTxs();
     } catch (error) {
       console.error(`Bot error in processPendingFinalizations:`, {
         message: error instanceof Error ? error.message : String(error),
@@ -407,17 +409,27 @@ export class FinalizationBot {
   }
 
   /**
-   * Clean up in-flight tx tracking for pledges that no longer exist in the database.
-   * Called once per polling cycle after pledge queries.
+   * Clean up in-flight tx tracking: drop pledges that no longer exist in the database,
+   * and txs the node rejected or no longer knows (evicted from the pool), so the pledge
+   * is retried next cycle. Called at the start of every cycle.
    */
-  private cleanupInFlightTxs(): void {
-    const allPledges = this.db.getAllPledges();
-    const livePledgeIds = new Set(allPledges.map((p) => p.id));
+  private async cleanupInFlightTxs(): Promise<void> {
+    const livePledgeIds = new Set(this.db.getAllPledges().map((p) => p.id));
 
-    for (const pledgeId of this.inFlightTxs.keys()) {
+    for (const [pledgeId, txHash] of [...this.inFlightTxs]) {
       if (!livePledgeIds.has(pledgeId)) {
         this.inFlightTxs.delete(pledgeId);
         console.log(`Bot: Cleared in-flight tx for pledge ${pledgeId} (cell no longer exists)`);
+        continue;
+      }
+      try {
+        const response = await this.client.getTransaction(txHash);
+        if (!response || response.status === "rejected" || response.status === "unknown") {
+          this.inFlightTxs.delete(pledgeId);
+          console.log(`Bot: Tx ${txHash} for pledge ${pledgeId} was dropped, will retry`);
+        }
+      } catch {
+        // RPC hiccup: keep the entry and check again next cycle
       }
     }
   }

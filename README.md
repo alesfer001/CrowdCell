@@ -16,7 +16,7 @@ CKB stores state in cells. CrowdCell uses that literally: a campaign is a cell, 
 
 1. **Create.** A creator publishes a campaign cell with a funding goal in CKB and a deadline block. Neither can be changed afterwards.
 2. **Pledge.** A backer locks CKB into a pledge cell, and the campaign's on-chain total goes up in the same transaction. A receipt cell lands in the backer's wallet as proof.
-3. **Settle.** After the deadline the campaign is finalized against its on-chain total, then every pledge is released to the creator or refunded to its backer. A finalization bot does this automatically, and anyone else can too.
+3. **Settle.** After the deadline the campaign is finalized against its on-chain total, then every pledge is released to the creator or refunded to its backer. A finalization bot does this automatically, and anyone else can too. To run your own keeper, see [off-chain/indexer/KEEPER.md](off-chain/indexer/KEEPER.md).
 
 If a pledge is still unsettled about 180 days after the deadline, anyone can send it back to its backer without the campaign cell at all, so nothing can get stuck.
 
@@ -47,7 +47,7 @@ contracts/                    Rust + ckb-std, compiled to RISC-V for CKB-VM
   receipt/                    type script: backer receipts
 off-chain/
   transaction-builder/        TypeScript + CCC: builds every transaction, deploy and test scripts
-  indexer/                    Express + SQLite: indexes cells, serves the API, runs the finalization bot
+  indexer/                    Express + SQLite: indexes cells, serves the API, runs the finalization bot (also runs alone as a keeper)
   frontend/                   Next.js: landing page and the app
 e2e/                          browser test scenarios
 scripts/build-contracts.sh    builds all five contracts
