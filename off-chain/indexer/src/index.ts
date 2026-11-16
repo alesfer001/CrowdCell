@@ -4,6 +4,9 @@ import { IndexerAPI } from "./api";
 import { Database } from "./database";
 import { FinalizationBot } from "./bot";
 import { createFinalizationBot, loadContractConfig, readIntSetting, readNetwork } from "./keeperSetup";
+import { loadCampaignClaimConfig } from "./claims/config";
+import { createCampaignClaimSigner } from "./claims/issuer";
+import { CampaignClaimService } from "./claims/service";
 
 /**
  * Main entry point for the indexer service
@@ -69,6 +72,35 @@ async function main() {
     console.log("BOT_PRIVATE_KEY not set — bot disabled");
   }
 
+  let campaignClaimIssuer: CampaignClaimService | null = null;
+  try {
+    const campaignClaimConfig = loadCampaignClaimConfig(
+      process.env,
+      CAMPAIGN_CODE_HASH,
+    );
+    if (campaignClaimConfig) {
+      console.log("Initializing Vellum campaign claim issuer...");
+      const issuerSigner = await createCampaignClaimSigner(
+        indexer.getClient(),
+        campaignClaimConfig,
+      );
+      campaignClaimIssuer = new CampaignClaimService(
+        indexer.getClient(),
+        issuerSigner,
+        db,
+        campaignClaimConfig,
+      );
+      console.log("Vellum campaign claim issuer initialized");
+    } else {
+      console.log("CrowdCell Vellum issuer settings not set — claim issuance disabled");
+    }
+  } catch (error) {
+    console.error(
+      "Failed to initialize Vellum campaign claims (continuing without claims):",
+      error,
+    );
+  }
+
   // Create and start API server
   const api = new IndexerAPI(indexer);
   api.start(PORT);
@@ -84,6 +116,7 @@ async function main() {
 
   // Start background polling
   indexer.startBackgroundIndexing(CAMPAIGN_CODE_HASH, PLEDGE_CODE_HASH, POLL_INTERVAL, RECEIPT_CODE_HASH || undefined, PLEDGE_LOCK_CODE_HASH || undefined);
+  campaignClaimIssuer?.start(POLL_INTERVAL);
 
   console.log("\nIndexer is ready!");
   console.log(`API available at http://localhost:${PORT}`);
@@ -92,6 +125,7 @@ async function main() {
   // Graceful shutdown handler
   function shutdown() {
     console.log("\nShutting down indexer...");
+    campaignClaimIssuer?.stop();
     indexer.stopBackgroundIndexing();
     api.stop();
     db.close();

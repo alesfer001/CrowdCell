@@ -10,6 +10,7 @@ export interface CampaignData {
   title?: string; // Variable-length metadata appended after the 65-byte header
   description?: string;
   category?: number; // Category byte after the description, see categories.ts
+  creatorDid?: string; // Canonical did:ckb identifier from the versioned metadata extension
 }
 
 export enum CampaignStatus {
@@ -42,6 +43,7 @@ export interface Campaign extends CampaignData {
   index: number;
   createdAt: bigint; // block number
   originalTxHash?: string; // For finalized campaigns: the original creation txHash (used for pledge linkage)
+  campaignTypeId?: string; // First 32 bytes of the stable campaign Type Script args
   creatorLockScript?: CreatorLockScript; // Full lock script of the creator (for release-to-creator on testnet/mainnet)
 }
 

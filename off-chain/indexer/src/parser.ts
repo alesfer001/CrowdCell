@@ -1,4 +1,7 @@
 import { CampaignData, CampaignStatus, PledgeData } from "./types";
+import { argsToDid, didToArgs, isDidCkb } from "@ckb-ccc/did-ckb";
+
+const DID_EXTENSION_PREFIX = "44494401";
 
 /**
  * Parse campaign data from cell data bytes
@@ -50,6 +53,7 @@ export function parseCampaignData(hexData: string): CampaignData {
   let title: string | undefined;
   let description: string | undefined;
   let category: number | undefined;
+  let creatorDid: string | undefined;
 
   const metadataStart = 130; // 65 bytes = 130 hex chars
   if (data.length > metadataStart + 4) {
@@ -83,6 +87,21 @@ export function parseCampaignData(hexData: string): CampaignData {
         // Parse the category byte
         if (offset + 2 <= data.length) {
           category = parseInt(data.slice(offset, offset + 2), 16);
+          offset += 2;
+
+          if (data.slice(offset, offset + 8).toLowerCase() === DID_EXTENSION_PREFIX.toLowerCase()) {
+            offset += 8;
+            if (offset + 2 > data.length) throw new Error("creator DID length is missing");
+            const didLength = parseInt(data.slice(offset, offset + 2), 16);
+            offset += 2;
+            const didEnd = offset + didLength * 2;
+            if (didEnd !== data.length) throw new Error("creator DID extension has invalid length");
+            const candidate = hexToUtf8(data.slice(offset, didEnd), true);
+            if (!isDidCkb(candidate) || argsToDid(didToArgs(candidate)) !== candidate) {
+              throw new Error("creator DID extension is not canonical did:ckb");
+            }
+            creatorDid = candidate;
+          }
         }
       }
     } catch {
@@ -99,6 +118,7 @@ export function parseCampaignData(hexData: string): CampaignData {
     title,
     description,
     category,
+    creatorDid,
   };
 }
 
@@ -150,12 +170,12 @@ function hexToU16LE(hex: string): number {
 /**
  * Convert hex string to UTF-8 string
  */
-function hexToUtf8(hex: string): string {
+function hexToUtf8(hex: string, fatal = false): string {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
   }
-  return new TextDecoder().decode(bytes);
+  return new TextDecoder("utf-8", { fatal }).decode(bytes);
 }
 
 /**

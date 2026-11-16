@@ -4,6 +4,7 @@ import { parseCampaignData, parsePledgeData, parseReceiptData } from "./parser";
 import { Database, DBCampaign, DBPledge, DBReceipt } from "./database";
 import { FinalizationBot } from "./bot";
 import { BackerPosition, ReceiptRecord } from "./wallet";
+import { verifyCampaignCreatorDid } from "./claims/provenance";
 
 /**
  * Create a network-aware CKB client
@@ -89,7 +90,9 @@ function createCkbClient(rpcUrl: string): ccc.Client {
           },
         ],
       },
+      [ccc.KnownScript.Secp256k1MultisigV2Beta]: undefined,
       [ccc.KnownScript.Secp256k1MultisigV2]: undefined,
+      [ccc.KnownScript.SUdt]: undefined,
       [ccc.KnownScript.XUdt]: undefined,
       [ccc.KnownScript.JoyId]: undefined,
       [ccc.KnownScript.COTA]: undefined,
@@ -97,6 +100,7 @@ function createCkbClient(rpcUrl: string): ccc.Client {
       [ccc.KnownScript.OmniLock]: undefined,
       [ccc.KnownScript.NostrLock]: undefined,
       [ccc.KnownScript.UniqueType]: undefined,
+      [ccc.KnownScript.DidCkb]: undefined,
       [ccc.KnownScript.AlwaysSuccess]: undefined,
       [ccc.KnownScript.InputTypeProxyLock]: undefined,
       [ccc.KnownScript.OutputTypeProxyLock]: undefined,
@@ -147,6 +151,7 @@ export class CampaignIndexer {
   private receiptHistory = new Map<string, ReceiptRecord[]>();
   /** Receipt outputs already folded into backerHistory and receiptHistory ("txHash_index") */
   private seenReceiptOutputs = new Set<string>();
+  private verifiedCreatorDids = new Set<string>();
   private pledgeLockCodeHash: string = "";
   private initialSyncComplete = false;
 
@@ -288,8 +293,44 @@ export class CampaignIndexer {
         // v1.2: resolve this for every campaign, not just finalized ones. The campaign
         // cell's out point moves on every pledge, and the creation tx hash is what pledges
         // and receipts are linked by.
-        const campaignTypeHash = ccc.Script.from(cell.cellOutput.type!).hash();
+        const campaignType = ccc.Script.from(cell.cellOutput.type!);
+        const campaignTypeHash = campaignType.hash();
+        const campaignTypeArgs = ccc.hexFrom(campaignType.args);
+        const campaignTypeId = `0x${campaignTypeArgs.slice(2, 66)}`;
         const originalTxHash = await this.getOriginalTxHash(cell.outPoint.txHash, campaignTypeHash);
+
+        let creatorDid: string | null = null;
+        if (data.creatorDid && originalTxHash) {
+          const verificationKey = [
+            campaignTypeId,
+            data.creatorDid,
+            data.creatorLockHash,
+            originalTxHash,
+          ].join(":");
+          let verified = this.verifiedCreatorDids.has(verificationKey);
+          if (!verified) {
+            try {
+              verified = await verifyCampaignCreatorDid(this.client, {
+                creatorDid: data.creatorDid,
+                creatorLockHash: data.creatorLockHash,
+                creationTxHash: originalTxHash,
+              });
+              if (verified) {
+                this.verifiedCreatorDids.add(verificationKey);
+              } else {
+                console.warn(
+                  `Ignoring unverified creator DID for campaign ${campaignTypeId}`,
+                );
+              }
+            } catch (error) {
+              console.warn(
+                `Failed to verify creator DID for campaign ${campaignTypeId}:`,
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+          }
+          if (verified) creatorDid = data.creatorDid;
+        }
 
         // Extract creator lock script by finding an output whose lock hash matches creatorLockHash.
         // For finalized campaigns, the creator's lock is only in the original creation tx
@@ -337,6 +378,8 @@ export class CampaignIndexer {
           created_at: blockNumber.toString(),
           original_tx_hash: originalTxHash || null,
           category: data.category ?? null,
+          campaign_type_id: campaignTypeId,
+          creator_did: creatorDid,
         });
       } catch (error) {
         console.error("Error parsing campaign cell:", error);
@@ -568,6 +611,8 @@ export class CampaignIndexer {
       createdAt: BigInt(row.created_at),
       originalTxHash: row.original_tx_hash || undefined,
       category: row.category ?? undefined,
+      campaignTypeId: row.campaign_type_id || undefined,
+      creatorDid: row.creator_did || undefined,
       creatorLockScript: row.creator_lock_code_hash
         ? {
             codeHash: row.creator_lock_code_hash,

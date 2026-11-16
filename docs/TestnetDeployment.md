@@ -95,6 +95,29 @@ DB_PATH=./data/indexer-testnet.db
 
 The indexer will poll the testnet every 10 seconds for new campaign/pledge cells.
 
+### Optional Vellum campaign claims
+
+CrowdCell can issue a `crowdcell.campaign-funded.v1` Claim Cell when a campaign with an
+on-chain Vellum identity reaches its goal and finalizes successfully. Issuance is disabled when
+both issuer settings are absent. To enable it on the Testnet indexer, configure a dedicated,
+funded issuer DID controller in Render:
+
+```env
+CKB_NETWORK=testnet
+CROWDCELL_VELLUM_ISSUER_DID=did:ckb:...
+CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY=0x...
+CROWDCELL_VELLUM_MIN_CONFIRMATIONS=6
+```
+
+The issuer key must control the configured DID and must be separate from `BOT_PRIVATE_KEY`.
+Partial or invalid issuer configuration stops indexer startup. Before issuing, the indexer verifies
+the campaign lineage, the DID controller at campaign creation, an input authorized by that
+controller, the successful finalization output, and the configured confirmation depth. It scans
+live Claim Cells and committed Claim Cell output history before every write. The chain history and
+deterministic campaign nonce provide recovery without relying on persistent Render disk state. A
+previously committed claim remains recorded as issued after its Cell is spent, so the worker does
+not recreate it automatically.
+
 ## 5. Start the Frontend
 
 ```bash
@@ -192,6 +215,11 @@ The indexer needs to re-index after the database migration. Delete the old `inde
 | `POLL_INTERVAL` | `10000` | Background polling interval (ms) |
 | `CAMPAIGN_CODE_HASH` | Devnet hash | Campaign contract code hash |
 | `PLEDGE_CODE_HASH` | Devnet hash | Pledge contract code hash |
+| `CKB_NETWORK` | `devnet` | Network; Vellum issuance requires `testnet` |
+| `CONTRACT_HASH_TYPE` | `data2` | Campaign Type Script hash type |
+| `CROWDCELL_VELLUM_ISSUER_DID` | unset | Dedicated Testnet issuer DID; absence keeps issuance disabled |
+| `CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY` | unset | Private controller key for the dedicated issuer DID |
+| `CROWDCELL_VELLUM_MIN_CONFIRMATIONS` | `6` | Required successful-finalization confirmations (1-100) |
 
 ### Deploy Script
 
