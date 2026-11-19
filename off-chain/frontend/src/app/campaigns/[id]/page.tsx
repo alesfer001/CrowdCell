@@ -927,8 +927,8 @@ export default function CampaignDetailPage() {
               )}
 
               <div>
-                <p className="text-sm text-ink-3 mb-1">Transaction</p>
-                <p className="font-mono text-sm break-all">{campaign.txHash}</p>
+                <p className="text-sm text-ink-3 mb-1">Creation transaction</p>
+                <p className="font-mono text-sm break-all">{campaign.originalTxHash || campaign.txHash}</p>
               </div>
             </div>
           </div>

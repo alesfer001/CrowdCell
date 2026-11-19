@@ -338,8 +338,14 @@ export class CampaignIndexer {
         // For Active campaigns, check the current tx (creation tx).
         let creatorLock: { codeHash: string; hashType: string; args: string } | null = null;
         const lookupTxHash = originalTxHash || cell.outPoint.txHash;
+        // The campaign cell moves on every pledge, so its own block is the latest pledge's.
+        // "Created at" is the creation tx's block, read from the same lookup.
+        let createdBlock = blockNumber;
         try {
           const txData = await this.client.getTransaction(lookupTxHash);
+          if (txData?.blockNumber !== undefined && txData?.blockNumber !== null) {
+            createdBlock = BigInt(txData.blockNumber);
+          }
           if (txData?.transaction) {
             for (const output of txData.transaction.outputs) {
               const script = ccc.Script.from(output.lock);
@@ -375,7 +381,7 @@ export class CampaignIndexer {
           status: data.status,
           title: data.title || null,
           description: data.description || null,
-          created_at: blockNumber.toString(),
+          created_at: createdBlock.toString(),
           original_tx_hash: originalTxHash || null,
           category: data.category ?? null,
           campaign_type_id: campaignTypeId,
