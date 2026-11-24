@@ -24,7 +24,7 @@ import {
   formatCost,
 } from "@/lib/utils";
 import { categoryLabel } from "@/lib/categories";
-import { CONTRACTS, MIN_PLEDGE_CKB, PLEDGE_CELL_OVERHEAD, RECEIPT_CELL_CAPACITY, EXPLORER_URL, GRACE_PERIOD_BLOCKS } from "@/lib/constants";
+import { CONTRACTS, MIN_PLEDGE_CKB, PLEDGE_CELL_OVERHEAD, RECEIPT_CELL_CAPACITY, EXPLORER_URL, GRACE_PERIOD_BLOCKS, IS_TESTNET } from "@/lib/constants";
 import {
   u64ToHexLE,
   readTotalPledged,
@@ -39,6 +39,8 @@ import { SkeletonDetailPage } from "@/components/Skeleton";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
 import { useCellNames } from "@/components/CellName";
 import { VellumIdentityLink } from "@/components/VellumIdentityLink";
+import { PledgeSessionPanel } from "@/components/PledgeSessionPanel";
+import { PledgeSession, pledgeSessionUnusable, sendPledgeWithSession } from "@/lib/pledgeSession";
 
 type PledgeSortMode = "recent" | "amount";
 
@@ -87,6 +89,8 @@ export default function CampaignDetailPage() {
   const [pledging, setPledging] = useState(false);
   const [pledgeError, setPledgeError] = useState<string | null>(null);
   const [pledgeTxHash, setPledgeTxHash] = useState<string | null>(null);
+  // Opt-in, testnet only: null unless the backer opened a pledge session
+  const [pledgeSession, setPledgeSession] = useState<PledgeSession | null>(null);
 
   // Action state
   const [actionLoading, setActionLoading] = useState(false);
@@ -199,6 +203,15 @@ export default function CampaignDetailPage() {
       const backerLockHash = backerLockScript.hash();
 
       const amountShannons = ckbToShannons(amount);
+
+      // With a pledge session open, the session pays and signs, so a rebuilt pledge needs no
+      // second wallet prompt. A pledge the session can't cover goes through the wallet.
+      let session: PledgeSession | null = null;
+      if (pledgeSession) {
+        const reason = await pledgeSessionUnusable(pledgeSession, client, backerLockHash, amountShannons);
+        if (reason) toast("info", `${reason} Pledging from your wallet instead.`);
+        else session = pledgeSession;
+      }
 
       // Pledges record the campaign's CREATION tx hash, which is what the indexer links
       // them by. campaign.txHash is the cell's current out point, and since v1.2 that moves
@@ -329,11 +342,15 @@ export default function CampaignDetailPage() {
         // Empty witness for the campaign cell input (custom lock, no signature needed)
         tx.witnesses.push("0x");
 
-        await tx.completeInputsByCapacity(signer);
-        await tx.completeFeeBy(signer, 2000);
+        if (!session) {
+          await tx.completeInputsByCapacity(signer);
+          await tx.completeFeeBy(signer, 2000);
+        }
 
         try {
-          hash = await signer.sendTransaction(tx);
+          hash = session
+            ? await sendPledgeWithSession(session, client, tx, backerLockScript)
+            : await signer.sendTransaction(tx);
         } catch (sendError) {
           if (attempt >= PLEDGE_ATTEMPTS || !isInputAlreadySpentError(sendError)) {
             if (isInputAlreadySpentError(sendError)) {
@@ -343,7 +360,7 @@ export default function CampaignDetailPage() {
           }
           toast("info", "Another pledge landed at the same moment. Updating yours to go on top of it…");
           await waitForCampaignCellToMove(client, campaign.campaignId, campaignCell.outPoint);
-          if (!isDevnet) toast("info", "Please approve the updated pledge in your wallet");
+          if (!isDevnet && !session) toast("info", "Please approve the updated pledge in your wallet");
         }
       }
 
@@ -781,6 +798,18 @@ export default function CampaignDetailPage() {
                   {pledging ? "Submitting..." : "Pledge"}
                 </button>
               </form>
+            )}
+
+            {/* Opt-in pledge session. An open one shows on every campaign, so it can be closed */}
+            {signer && IS_TESTNET && !isDevnet && (
+              <PledgeSessionPanel
+                signer={signer}
+                canOpen={canPledge}
+                session={pledgeSession}
+                onChange={setPledgeSession}
+                refreshKey={pledgeTxHash}
+                disabled={pledging}
+              />
             )}
           </div>
         </div>
