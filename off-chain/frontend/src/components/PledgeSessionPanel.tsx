@@ -191,6 +191,8 @@ export function PledgeSessionPanel({ signer, canOpen, session, onChange, refresh
         {budget !== null && `Sets ${formatCost(budget)} CKB aside (each pledge also carries ${formatCost(PLEDGE_SESSION_OVERHEAD)} CKB of deposits), plus about ${formatCost(PLEDGE_SESSION_FEE_CELL)} CKB for fees. `}
         It lasts {PLEDGE_SESSION_HOURS} hour in this browser, but only Close ends it on chain. There
         is no rate limit: until you close it, a key taken from this browser could spend all of it.
+        The key lives only in this browser, so keep its site data and don&apos;t use a private
+        window: closing one loses the key, Close can&apos;t refund, and the budget needs a manual sweep.
       </p>
       <div className="flex gap-2">
         <button
