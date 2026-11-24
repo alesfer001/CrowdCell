@@ -1,6 +1,6 @@
 # Testnet Deployment Guide
 
-Step-by-step guide to deploy CKB Kickstarter to the CKB testnet (Pudge).
+Step-by-step guide to deploy CrowdCell to the CKB testnet (Pudge).
 
 ## Prerequisites
 
