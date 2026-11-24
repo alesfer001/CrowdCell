@@ -17,6 +17,7 @@ import { sendFinalize, sendReclaimReceipts, sendRefund } from "@/lib/campaignAct
 import { CellMeter, CellMeterTone } from "@/components/CellMeter";
 import { SkeletonCard } from "@/components/Skeleton";
 import { useActiveWallet } from "@/components/useWallet";
+import { LockName, useCellNames } from "@/components/CellName";
 import { useIndexerReady, IndexerWaitNotice } from "@/components/IndexerStatus";
 import {
   ActionButton,
@@ -70,7 +71,7 @@ function meterTone(outcome: PledgeOutcome): CellMeterTone {
  * amount pledged, so settled campaigns stay listed.
  */
 export default function MyPledgesPage() {
-  const { signer, lockHash, addressFailed, open, isDevnet } = useActiveWallet();
+  const { signer, lockHash, lockScript, addressFailed, open, isDevnet } = useActiveWallet();
   const { busy, lastTx, run } = useRowActions<ActionKind>(lockHash);
   // The wallet the latest load is for, so a reply for a previous wallet is dropped
   const lockHashRef = useRef(lockHash);
@@ -144,6 +145,7 @@ export default function MyPledgesPage() {
     });
   }
 
+  const creatorNames = useCellNames(positions.map((p) => p.campaign?.creatorLockScript));
   const showSkeletons = lockHash !== null && (indexerReady ? loading : indexerPhase !== IndexerPhase.Offline);
   const showContent = lockHash !== null && indexerReady && !loading;
   const reclaimable = positions.reduce((sum, p) => sum + BigInt(p.reclaimableDeposit), 0n);
@@ -153,6 +155,7 @@ export default function MyPledgesPage() {
       <div className="max-w-6xl mx-auto px-4">
         <DashboardHeader
           title="My pledges"
+          wallet={{ lockHash, lockScript }}
           indexerPhase={indexerPhase}
           actions={
             <Link href="/app" className={PRIMARY_BUTTON}>
@@ -217,6 +220,7 @@ export default function MyPledgesPage() {
                   anyBusy={busy !== null}
                   txHash={lastTx?.id === p.linkage ? lastTx.hash : null}
                   onAction={(kind) => runAction(p, kind)}
+                  names={creatorNames}
                 />
               ))}
             </div>
@@ -234,10 +238,12 @@ interface PledgeCardProps {
   busy: RowAction<ActionKind> | null;
   anyBusy: boolean;
   txHash: string | null;
+  /** `.cell` names by lock hash, looked up once for all the cards */
+  names: Map<string, string | null>;
   onAction: (kind: ActionKind) => void;
 }
 
-function PledgeCard({ position, currentBlock, busy, anyBusy, txHash, onAction }: PledgeCardProps) {
+function PledgeCard({ position, currentBlock, busy, anyBusy, txHash, onAction, names }: PledgeCardProps) {
   const { campaign, outcome } = position;
   const badge = OUTCOME_BADGE[outcome];
   const blocksLeft = campaign && currentBlock !== null ? BigInt(campaign.deadlineBlock) - currentBlock : null;
@@ -293,6 +299,14 @@ function PledgeCard({ position, currentBlock, busy, anyBusy, txHash, onAction }:
             <dt className="text-ink-3">Receipt deposit</dt>
             <dd className="font-mono text-right">
               {shannonsToCKB(locked)} CKB {reclaimable > 0n ? "· reclaimable" : "· held"}
+            </dd>
+          </>
+        )}
+        {campaign && (
+          <>
+            <dt className="text-ink-3">Creator</dt>
+            <dd className="font-mono text-right min-w-0 break-all">
+              <LockName lockHash={campaign.creator} names={names} />
             </dd>
           </>
         )}

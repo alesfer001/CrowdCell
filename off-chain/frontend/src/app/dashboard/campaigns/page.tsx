@@ -46,7 +46,7 @@ function rowFingerprint(c: WalletCampaign | undefined): string {
  * campaign page.
  */
 export default function MyCampaignsPage() {
-  const { signer, lockHash, addressFailed, open, isDevnet } = useActiveWallet();
+  const { signer, lockHash, lockScript, addressFailed, open, isDevnet } = useActiveWallet();
   const { toast } = useToast();
   const { busy, lastTx, run } = useRowActions<ActionKind>(lockHash);
   // The wallet the latest load is for, so a reply for a previous wallet is dropped
@@ -144,6 +144,7 @@ export default function MyCampaignsPage() {
       <div className="max-w-6xl mx-auto px-4">
         <DashboardHeader
           title="My campaigns"
+          wallet={{ lockHash, lockScript }}
           indexerPhase={indexerPhase}
           actions={
             <Link href="/campaigns/new" className={PRIMARY_BUTTON}>

@@ -4,6 +4,7 @@ import { CampaignIndexer } from "./indexer";
 import { Campaign, Pledge, Receipt } from "./types";
 import { categorySlug } from "./categories";
 import { parseCampaignFilter, matchesCampaignFilter } from "./search";
+import { CellNameResolver, parseCellNameRequest } from "./cellNames";
 import {
   canReclaimDeposits,
   computeEffectiveStatus,
@@ -22,19 +23,31 @@ const LOCK_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 export class IndexerAPI {
   private app: express.Application;
   private indexer: CampaignIndexer;
+  private cellNames: CellNameResolver | null;
   private server: ReturnType<typeof this.app.listen> | null = null;
 
-  constructor(indexer: CampaignIndexer) {
+  constructor(indexer: CampaignIndexer, cellNames: CellNameResolver | null = null) {
     this.app = express();
     this.indexer = indexer;
+    this.cellNames = cellNames;
 
     this.setupMiddleware();
     this.setupRoutes();
+    this.setupErrorHandler();
   }
 
   private setupMiddleware() {
     this.app.use(cors());
     this.app.use(express.json());
+  }
+
+  /** Bad request bodies (malformed JSON, too large) get a short JSON error, not Express's HTML page with a stack trace. */
+  private setupErrorHandler() {
+    this.app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (res.headersSent) return next(err);
+      const status = typeof err?.status === "number" && err.status >= 400 && err.status < 500 ? err.status : 500;
+      res.status(status).json({ error: status === 500 ? "Internal error" : "Invalid request body" });
+    });
   }
 
   private setupRoutes() {
@@ -193,6 +206,21 @@ export class IndexerAPI {
             : "0",
           lockedDeposit: p.liveReceipts.reduce((sum, r) => sum + r.capacity, 0n).toString(),
         })));
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // `.cell` names for lock scripts: { locks: [{ codeHash, hashType, args }] } -> { names: { lockHash: name | null } }.
+    // Looked up here so visitors' browsers don't contact cellula.id. Locks the upstream didn't answer are left out.
+    this.app.post("/cell-names", async (req, res) => {
+      const parsed = parseCellNameRequest(req.body);
+      if ("error" in parsed) {
+        return res.status(400).json({ error: parsed.error });
+      }
+      try {
+        const names = this.cellNames ? await this.cellNames.lookup(parsed.locks) : {};
+        res.json({ names });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }

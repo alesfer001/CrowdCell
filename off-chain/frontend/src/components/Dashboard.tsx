@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { IndexerPhase } from "@/lib/types";
+import { CreatorLockScript, IndexerPhase } from "@/lib/types";
 import { isInputAlreadySpentError, isWalletCancel } from "@/lib/campaignActions";
 import { IndexerStatusBadge } from "./IndexerStatus";
+import { LockName, useCellNames } from "./CellName";
 import { useToast } from "./Toast";
 
 /** Shared styles for the dashboard pages */
@@ -33,13 +34,16 @@ interface DashboardHeaderProps {
   indexerPhase: IndexerPhase;
   /** Extra controls on the right, next to the indexer badge */
   actions?: React.ReactNode;
+  /** The connected wallet, shown under the title with its `.cell` name when it has one */
+  wallet?: { lockHash: string | null; lockScript: CreatorLockScript | null };
 }
 
 /**
  * Title, indexer badge and the tabs between the creator and backer dashboards.
  */
-export function DashboardHeader({ title, indexerPhase, actions }: DashboardHeaderProps) {
+export function DashboardHeader({ title, indexerPhase, actions, wallet }: DashboardHeaderProps) {
   const pathname = usePathname();
+  const names = useCellNames([wallet?.lockScript]);
   return (
     <div className="mb-8">
       <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -48,6 +52,11 @@ export function DashboardHeader({ title, indexerPhase, actions }: DashboardHeade
           <h1 className="font-display font-medium tracking-tight text-[clamp(24px,3.2vw,36px)] leading-[1.15] mt-2.5">
             {title}
           </h1>
+          {wallet?.lockHash && (
+            <p className="font-mono text-[11px] text-ink-3 mt-2">
+              wallet <LockName lockHash={wallet.lockHash} names={names} />
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <IndexerStatusBadge phase={indexerPhase} />

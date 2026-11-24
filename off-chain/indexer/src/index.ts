@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { CampaignIndexer } from "./indexer";
 import { IndexerAPI } from "./api";
+import { CellNameResolver } from "./cellNames";
 import { Database } from "./database";
 import { FinalizationBot } from "./bot";
 import { createFinalizationBot, loadContractConfig, readIntSetting, readNetwork } from "./keeperSetup";
@@ -102,7 +103,7 @@ async function main() {
   }
 
   // Create and start API server
-  const api = new IndexerAPI(indexer);
+  const api = new IndexerAPI(indexer, new CellNameResolver(network));
   api.start(PORT);
 
   // Initial indexing
