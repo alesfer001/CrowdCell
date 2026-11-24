@@ -689,9 +689,6 @@ export class CampaignIndexer {
   }
 
   /**
-   * Get all campaigns
-   */
-  /**
    * Lowercase lock hashes of every campaign creator and backer the indexer has seen. Used to keep the public
    * `.cell` name lookup to locks that appear in CrowdCell cells.
    */
@@ -703,6 +700,9 @@ export class CampaignIndexer {
     return hashes;
   }
 
+  /**
+   * Get all campaigns
+   */
   getCampaigns(): Campaign[] {
     return this.db.getAllCampaigns().map((row) => this.dbToCampaign(row));
   }
