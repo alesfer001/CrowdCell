@@ -16,7 +16,7 @@ CKB stores state in cells. CrowdCell uses that literally: a campaign is a cell, 
 
 1. **Create.** A creator publishes a campaign cell with a funding goal in CKB and a deadline block. Neither can be changed afterwards.
 2. **Pledge.** A backer locks CKB into a pledge cell, and the campaign's on-chain total goes up in the same transaction. A receipt cell lands in the backer's wallet as proof.
-3. **Settle.** After the deadline the campaign is finalized against its on-chain total, then every pledge is released to the creator or refunded to its backer. A finalization bot does this automatically, and anyone else can too.
+3. **Settle.** After the deadline the campaign is finalized against its on-chain total, then every pledge is released to the creator or refunded to its backer. A finalization bot does this automatically, and anyone else can too. To run your own keeper, see [off-chain/indexer/KEEPER.md](off-chain/indexer/KEEPER.md).
 
 If a pledge is still unsettled about 180 days after the deadline, anyone can send it back to its backer without the campaign cell at all, so nothing can get stuck.
 
@@ -47,7 +47,7 @@ contracts/                    Rust + ckb-std, compiled to RISC-V for CKB-VM
   receipt/                    type script: backer receipts
 off-chain/
   transaction-builder/        TypeScript + CCC: builds every transaction, deploy and test scripts
-  indexer/                    Express + SQLite: indexes cells, serves the API, runs the finalization bot
+  indexer/                    Express + SQLite: indexes cells, serves the API, runs the finalization bot (also runs alone as a keeper)
   frontend/                   Next.js: landing page and the app
 e2e/                          browser test scenarios
 scripts/build-contracts.sh    builds all five contracts
@@ -55,15 +55,15 @@ scripts/build-contracts.sh    builds all five contracts
 
 ## Testnet deployment
 
-Deployed 2026-09-17. Each link is the transaction that holds the contract code.
+Deployed 2026-10-31. Each link is the transaction that holds the contract code. All five use `hash_type` `data2`; a clean `./scripts/build-contracts.sh` reproduces these hashes (`deployment/checksums-testnet.txt`).
 
 | Contract | Code hash | Deployment |
 |---|---|---|
-| campaign | `0x1d9b9e5959c932c0ff6486e03cd69d0e51a6b087dacf80b909c23d713bd2659c` | [tx](https://pudge.explorer.nervos.org/transaction/0x609fbcf58825e83af21e2a5cc28d3f217d5019be75290e6f60455cf3de9ca1ba) |
-| campaign-lock | `0xb6e2b333d0f38a89c70cde6558670b771244695d33daa1fa62385017476401bf` | [tx](https://pudge.explorer.nervos.org/transaction/0xc4e8aaaefd921550daa21222cebeccaad7fd5d178d4df567d94c9248a5c149b6) |
-| pledge | `0xe45d09f08d0e842340afb004cfb6b6b6414ad387f9cd2f3e0b9abcd6ae8eb024` | [tx](https://pudge.explorer.nervos.org/transaction/0xcf0d6069aa261109704bcabe70d65c3cddddd8c0605fadd12fa0378f2fdb33cf) |
-| pledge-lock | `0xc28d8042a1cf39d02db0cbc769a26faad80b39563c2d2de40536ddb66ae3a525` | [tx](https://pudge.explorer.nervos.org/transaction/0x1dc0f07d3acd90823932aca7034209cbf5d1bd8ba5c9310ea9bb55b7c0a0beb2) |
-| receipt | `0x2bac36d4cadd65b66c25557d37c2bba4f7e3c40a94ca92f3853b311887dba575` | [tx](https://pudge.explorer.nervos.org/transaction/0x63d545b60d5eb9680230f8822f597d70f76cfab5e738d9118a977836e317b967) |
+| campaign | `0xd50ca43249515bb0ebe8534f4d7f74520e4fb7c1163d488c288672ffd7e7a8f5` | [tx](https://pudge.explorer.nervos.org/transaction/0x8ffc8f88be667072ca06e89127444be41029baabae30306d8247c11dd6f1c799) |
+| campaign-lock | `0xd975780a890b817303a5414167ce235c041a9e63bb5e85f764acc71209fd02a3` | [tx](https://pudge.explorer.nervos.org/transaction/0x1ea89700f68f672f950cd43bb764bf7148039d7c8151dad04922437d33d21504) |
+| pledge | `0xe45d09f08d0e842340afb004cfb6b6b6414ad387f9cd2f3e0b9abcd6ae8eb024` | [tx](https://pudge.explorer.nervos.org/transaction/0x49961d44d1712cdeade84d86fe2ca2466b8a1d77462a61dcfc9c27944277af3d) |
+| pledge-lock | `0xc28d8042a1cf39d02db0cbc769a26faad80b39563c2d2de40536ddb66ae3a525` | [tx](https://pudge.explorer.nervos.org/transaction/0x53d7d6447fb21b4da1e211a48a4fb2d5ceafd510ec88c966666b08085708bf1e) |
+| receipt | `0x523716e6c46501480391965a9305d2be33045ce3be19300f62546ff3aa8bf8b5` | [tx](https://pudge.explorer.nervos.org/transaction/0xe40519d726f365e0d24baf31f5e4402d021efca4a62449f5d4215a800e60436d) |
 
 ## Run it locally
 

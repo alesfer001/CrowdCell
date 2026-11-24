@@ -18,6 +18,9 @@ export interface DBCampaign {
   description: string | null;
   created_at: string;
   original_tx_hash: string | null;
+  category: number | null;
+  campaign_type_id: string | null;
+  creator_did: string | null;
 }
 
 export interface DBPledge {
@@ -43,6 +46,7 @@ export interface DBReceipt {
   status: string;
   block_number: string;
   created_at: string;
+  capacity: string | null;
 }
 
 /**
@@ -81,7 +85,10 @@ export class Database {
         title TEXT,
         description TEXT,
         created_at TEXT NOT NULL,
-        original_tx_hash TEXT
+        original_tx_hash TEXT,
+        category INTEGER,
+        campaign_type_id TEXT,
+        creator_did TEXT
       );
 
       CREATE TABLE IF NOT EXISTS pledges (
@@ -106,7 +113,8 @@ export class Database {
         pledge_amount TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'live',
         block_number TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        capacity TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_receipts_campaign ON receipts(campaign_id);
@@ -142,6 +150,23 @@ export class Database {
       this.db.exec("ALTER TABLE pledges ADD COLUMN backer_lock_hash_type TEXT");
       this.db.exec("ALTER TABLE pledges ADD COLUMN backer_lock_args TEXT");
     }
+
+    // Campaign category byte (M1)
+    if (!columnNames.has("category")) {
+      this.db.exec("ALTER TABLE campaigns ADD COLUMN category INTEGER");
+    }
+    if (!columnNames.has("campaign_type_id")) {
+      this.db.exec("ALTER TABLE campaigns ADD COLUMN campaign_type_id TEXT");
+    }
+    if (!columnNames.has("creator_did")) {
+      this.db.exec("ALTER TABLE campaigns ADD COLUMN creator_did TEXT");
+    }
+
+    // Receipt cell capacity, so dashboards can show the deposit a backer gets back (M1)
+    const receiptColumns = this.db.prepare("PRAGMA table_info(receipts)").all() as { name: string }[];
+    if (!receiptColumns.some((c) => c.name === "capacity")) {
+      this.db.exec("ALTER TABLE receipts ADD COLUMN capacity TEXT");
+    }
   }
 
   /**
@@ -150,8 +175,8 @@ export class Database {
    */
   replaceLiveCells(campaigns: DBCampaign[], pledges: DBPledge[], receipts: DBReceipt[] = []) {
     const insertCampaign = this.db.prepare(`
-      INSERT OR REPLACE INTO campaigns (id, tx_hash, output_index, creator_lock_hash, creator_lock_code_hash, creator_lock_hash_type, creator_lock_args, funding_goal, deadline_block, total_pledged, status, title, description, created_at, original_tx_hash)
-      VALUES (@id, @tx_hash, @output_index, @creator_lock_hash, @creator_lock_code_hash, @creator_lock_hash_type, @creator_lock_args, @funding_goal, @deadline_block, @total_pledged, @status, @title, @description, @created_at, @original_tx_hash)
+      INSERT OR REPLACE INTO campaigns (id, tx_hash, output_index, creator_lock_hash, creator_lock_code_hash, creator_lock_hash_type, creator_lock_args, funding_goal, deadline_block, total_pledged, status, title, description, created_at, original_tx_hash, category, campaign_type_id, creator_did)
+      VALUES (@id, @tx_hash, @output_index, @creator_lock_hash, @creator_lock_code_hash, @creator_lock_hash_type, @creator_lock_args, @funding_goal, @deadline_block, @total_pledged, @status, @title, @description, @created_at, @original_tx_hash, @category, @campaign_type_id, @creator_did)
     `);
 
     const insertPledge = this.db.prepare(`
@@ -160,8 +185,8 @@ export class Database {
     `);
 
     const insertReceipt = this.db.prepare(`
-      INSERT OR REPLACE INTO receipts (id, tx_hash, output_index, campaign_id, backer_lock_hash, pledge_amount, status, block_number, created_at)
-      VALUES (@id, @tx_hash, @output_index, @campaign_id, @backer_lock_hash, @pledge_amount, @status, @block_number, @created_at)
+      INSERT OR REPLACE INTO receipts (id, tx_hash, output_index, campaign_id, backer_lock_hash, pledge_amount, status, block_number, created_at, capacity)
+      VALUES (@id, @tx_hash, @output_index, @campaign_id, @backer_lock_hash, @pledge_amount, @status, @block_number, @created_at, @capacity)
     `);
 
     const transaction = this.db.transaction(() => {
@@ -192,22 +217,28 @@ export class Database {
     return this.db.prepare("SELECT * FROM campaigns").all() as DBCampaign[];
   }
 
+  getCampaignsByCreator(lockHash: string): DBCampaign[] {
+    return this.db
+      .prepare("SELECT * FROM campaigns WHERE lower(creator_lock_hash) = ?")
+      .all(lockHash.toLowerCase()) as DBCampaign[];
+  }
+
   getCampaign(id: string): DBCampaign | undefined {
     return this.db.prepare("SELECT * FROM campaigns WHERE id = ?").get(id) as DBCampaign | undefined;
   }
 
   getPledgesForCampaign(campaignTxHash: string): DBPledge[] {
     const normalizedHash = campaignTxHash.toLowerCase();
-    return (this.db.prepare("SELECT * FROM pledges").all() as DBPledge[]).filter(
-      (p) => p.campaign_id.toLowerCase() === normalizedHash
-    );
+    return this.db
+      .prepare("SELECT * FROM pledges WHERE lower(campaign_id) = ?")
+      .all(normalizedHash) as DBPledge[];
   }
 
   getPledgesForBacker(lockHash: string): DBPledge[] {
     const normalizedHash = lockHash.toLowerCase();
-    return (this.db.prepare("SELECT * FROM pledges").all() as DBPledge[]).filter(
-      (p) => p.backer_lock_hash.toLowerCase() === normalizedHash
-    );
+    return this.db
+      .prepare("SELECT * FROM pledges WHERE lower(backer_lock_hash) = ?")
+      .all(normalizedHash) as DBPledge[];
   }
 
   getAllPledges(): DBPledge[] {
@@ -226,16 +257,16 @@ export class Database {
     const txHashOnly = normalizedId.includes("_")
       ? normalizedId.split("_")[0]
       : normalizedId;
-    return (this.db.prepare("SELECT * FROM receipts").all() as DBReceipt[]).filter(
-      (r) => r.campaign_id.toLowerCase() === normalizedId || r.campaign_id.toLowerCase() === txHashOnly
-    );
+    return this.db
+      .prepare("SELECT * FROM receipts WHERE lower(campaign_id) IN (?, ?)")
+      .all(normalizedId, txHashOnly) as DBReceipt[];
   }
 
   getReceiptsForBacker(lockHash: string): DBReceipt[] {
     const normalizedHash = lockHash.toLowerCase();
-    return (this.db.prepare("SELECT * FROM receipts").all() as DBReceipt[]).filter(
-      (r) => r.backer_lock_hash.toLowerCase() === normalizedHash
-    );
+    return this.db
+      .prepare("SELECT * FROM receipts WHERE lower(backer_lock_hash) = ?")
+      .all(normalizedHash) as DBReceipt[];
   }
 
   /**

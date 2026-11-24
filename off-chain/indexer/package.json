@@ -7,7 +7,9 @@
     "build": "tsc",
     "start": "node dist/indexer/src/index.js",
     "dev": "ts-node src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "keeper": "node dist/indexer/src/keeper.js",
+    "keeper:dev": "ts-node src/keeper.ts",
+    "test": "node --require ts-node/register --test test/*.test.ts"
   },
   "keywords": [
     "ckb",
@@ -18,9 +20,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@ckb-ccc/core": "^1.12.2",
+    "@ckb-ccc/core": "^1.23.0",
+    "@ckb-ccc/did-ckb": "^0.2.15",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@usevellum/sdk": "^0.1.2",
     "better-sqlite3": "^12.6.2",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",

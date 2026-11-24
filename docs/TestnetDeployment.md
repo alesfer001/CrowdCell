@@ -10,23 +10,21 @@ Step-by-step guide to deploy CrowdCell to the CKB testnet (Pudge).
 
 ## 1. Get a Funded Testnet Account
 
-### Generate a key (if you don't have one)
+### The deployer key
 
-Use `ckb-cli` or any CKB wallet to generate a keypair:
-
-```bash
-ckb-cli account new
-```
-
-Save the private key securely. You'll need it as `DEPLOYER_PRIVATE_KEY`.
+The testnet deployer key lives in `off-chain/transaction-builder/.env` (gitignored) as
+`DEPLOYER_PRIVATE_KEY`, with its address in a comment above it. `deploy-contracts.ts` reads it
+from there on testnet, so reuse it for every deploy instead of making a new one. Only if that
+file is gone, generate a new key, write it there the same way, and fund the address.
 
 ### Get testnet CKB from the faucet
 
 1. Visit https://faucet.nervos.org/
 2. Enter your testnet address (starts with `ckt1...`)
-3. Request CKB — you need approximately **100,000 CKB** for deploying both contracts
+3. Request CKB — the five contracts take about **150,000 CKB** (144,576 bytes of binaries in
+   October 2026, plus cell overhead and fees)
 
-Contract binaries are typically 50–200 KB each, and each byte requires ~1 CKB of capacity.
+Each byte of a deployed binary requires 1 CKB of capacity.
 
 ## 2. Build Contracts
 
@@ -43,9 +41,7 @@ The same RISC-V binaries work on all CKB networks. Output:
 ```bash
 cd off-chain/transaction-builder
 
-CKB_NETWORK=testnet \
-DEPLOYER_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HERE \
-npx ts-node ../../scripts/deploy-contracts.ts
+CKB_NETWORK=testnet npx ts-node deploy-contracts.ts
 ```
 
 This will:
@@ -53,6 +49,10 @@ This will:
 - Wait for each transaction to confirm (~10 seconds per block)
 - Save results to `deployment/deployed-contracts-testnet.json`
 - Print the environment variables you need
+
+A contract whose binary matches the manifest and is still live on chain is reused, not deployed again, which saves about 1 CKB per byte. The script can stay running after it prints the summary; once the manifest is saved, it's safe to stop it.
+
+On Render, update the hashes with **Add variable > Import from .env**. The import adds new rows next to the existing ones, so remove the old rows before **Save and deploy**. After the deploy, check that the indexer lists the new campaigns.
 
 Example output:
 ```
@@ -94,6 +94,29 @@ DB_PATH=./data/indexer-testnet.db
 ```
 
 The indexer will poll the testnet every 10 seconds for new campaign/pledge cells.
+
+### Optional Vellum campaign claims
+
+CrowdCell can issue a `crowdcell.campaign-funded.v1` Claim Cell when a campaign with an
+on-chain Vellum identity reaches its goal and finalizes successfully. Issuance is disabled when
+both issuer settings are absent. To enable it on the Testnet indexer, configure a dedicated,
+funded issuer DID controller in Render:
+
+```env
+CKB_NETWORK=testnet
+CROWDCELL_VELLUM_ISSUER_DID=did:ckb:...
+CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY=0x...
+CROWDCELL_VELLUM_MIN_CONFIRMATIONS=6
+```
+
+The issuer key must control the configured DID and must be separate from `BOT_PRIVATE_KEY`.
+Partial or invalid issuer configuration stops indexer startup. Before issuing, the indexer verifies
+the campaign lineage, the DID controller at campaign creation, an input authorized by that
+controller, the successful finalization output, and the configured confirmation depth. It scans
+live Claim Cells and committed Claim Cell output history before every write. The chain history and
+deterministic campaign nonce provide recovery without relying on persistent Render disk state. A
+previously committed claim remains recorded as issued after its Cell is spent, so the worker does
+not recreate it automatically.
 
 ## 5. Start the Frontend
 
@@ -192,6 +215,11 @@ The indexer needs to re-index after the database migration. Delete the old `inde
 | `POLL_INTERVAL` | `10000` | Background polling interval (ms) |
 | `CAMPAIGN_CODE_HASH` | Devnet hash | Campaign contract code hash |
 | `PLEDGE_CODE_HASH` | Devnet hash | Pledge contract code hash |
+| `CKB_NETWORK` | `devnet` | Network; Vellum issuance requires `testnet` |
+| `CONTRACT_HASH_TYPE` | `data2` | Campaign Type Script hash type |
+| `CROWDCELL_VELLUM_ISSUER_DID` | unset | Dedicated Testnet issuer DID; absence keeps issuance disabled |
+| `CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY` | unset | Private controller key for the dedicated issuer DID |
+| `CROWDCELL_VELLUM_MIN_CONFIRMATIONS` | `6` | Required successful-finalization confirmations (1-100) |
 
 ### Deploy Script
 

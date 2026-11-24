@@ -9,8 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@ckb-ccc/connector-react": "^1.0.30",
-    "@ckb-ccc/core": "^1.12.2",
+    "@ckb-ccc/connector-react": "^2.2.2",
+    "@ckb-ccc/core": "^1.23.0",
+    "@ckb-ccc/did-ckb": "^0.2.15",
     "@xyflow/react": "^12.11.6",
     "next": "16.0.7",
     "react": "19.2.0",

@@ -3,6 +3,8 @@ import { Campaign, Pledge, Receipt, CampaignStatus } from "./types";
 import { parseCampaignData, parsePledgeData, parseReceiptData } from "./parser";
 import { Database, DBCampaign, DBPledge, DBReceipt } from "./database";
 import { FinalizationBot } from "./bot";
+import { BackerPosition, ReceiptRecord } from "./wallet";
+import { verifyCampaignCreatorDid } from "./claims/provenance";
 
 /**
  * Create a network-aware CKB client
@@ -88,7 +90,9 @@ function createCkbClient(rpcUrl: string): ccc.Client {
           },
         ],
       },
+      [ccc.KnownScript.Secp256k1MultisigV2Beta]: undefined,
       [ccc.KnownScript.Secp256k1MultisigV2]: undefined,
+      [ccc.KnownScript.SUdt]: undefined,
       [ccc.KnownScript.XUdt]: undefined,
       [ccc.KnownScript.JoyId]: undefined,
       [ccc.KnownScript.COTA]: undefined,
@@ -96,6 +100,7 @@ function createCkbClient(rpcUrl: string): ccc.Client {
       [ccc.KnownScript.OmniLock]: undefined,
       [ccc.KnownScript.NostrLock]: undefined,
       [ccc.KnownScript.UniqueType]: undefined,
+      [ccc.KnownScript.DidCkb]: undefined,
       [ccc.KnownScript.AlwaysSuccess]: undefined,
       [ccc.KnownScript.InputTypeProxyLock]: undefined,
       [ccc.KnownScript.OutputTypeProxyLock]: undefined,
@@ -136,13 +141,17 @@ export class CampaignIndexer {
   private db: Database;
   private bot: FinalizationBot | null = null;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
+  private pollInFlight = false;
   private campaignCodeHash: string = "";
   private pledgeCodeHash: string = "";
   private receiptCodeHash: string = "";
   /** Every backer a campaign has ever had, keyed by the pledge linkage hash (lowercase) */
   private backerHistory = new Map<string, Set<string>>();
-  /** Receipt outputs already folded into backerHistory ("txHash_index") */
+  /** Every receipt a backer has ever received, reclaimed ones included, keyed by backer lock hash (lowercase) */
+  private receiptHistory = new Map<string, ReceiptRecord[]>();
+  /** Receipt outputs already folded into backerHistory and receiptHistory ("txHash_index") */
   private seenReceiptOutputs = new Set<string>();
+  private verifiedCreatorDids = new Set<string>();
   private pledgeLockCodeHash: string = "";
   private initialSyncComplete = false;
 
@@ -284,8 +293,44 @@ export class CampaignIndexer {
         // v1.2: resolve this for every campaign, not just finalized ones. The campaign
         // cell's out point moves on every pledge, and the creation tx hash is what pledges
         // and receipts are linked by.
-        const campaignTypeHash = ccc.Script.from(cell.cellOutput.type!).hash();
+        const campaignType = ccc.Script.from(cell.cellOutput.type!);
+        const campaignTypeHash = campaignType.hash();
+        const campaignTypeArgs = ccc.hexFrom(campaignType.args);
+        const campaignTypeId = `0x${campaignTypeArgs.slice(2, 66)}`;
         const originalTxHash = await this.getOriginalTxHash(cell.outPoint.txHash, campaignTypeHash);
+
+        let creatorDid: string | null = null;
+        if (data.creatorDid && originalTxHash) {
+          const verificationKey = [
+            campaignTypeId,
+            data.creatorDid,
+            data.creatorLockHash,
+            originalTxHash,
+          ].join(":");
+          let verified = this.verifiedCreatorDids.has(verificationKey);
+          if (!verified) {
+            try {
+              verified = await verifyCampaignCreatorDid(this.client, {
+                creatorDid: data.creatorDid,
+                creatorLockHash: data.creatorLockHash,
+                creationTxHash: originalTxHash,
+              });
+              if (verified) {
+                this.verifiedCreatorDids.add(verificationKey);
+              } else {
+                console.warn(
+                  `Ignoring unverified creator DID for campaign ${campaignTypeId}`,
+                );
+              }
+            } catch (error) {
+              console.warn(
+                `Failed to verify creator DID for campaign ${campaignTypeId}:`,
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+          }
+          if (verified) creatorDid = data.creatorDid;
+        }
 
         // Extract creator lock script by finding an output whose lock hash matches creatorLockHash.
         // For finalized campaigns, the creator's lock is only in the original creation tx
@@ -293,8 +338,14 @@ export class CampaignIndexer {
         // For Active campaigns, check the current tx (creation tx).
         let creatorLock: { codeHash: string; hashType: string; args: string } | null = null;
         const lookupTxHash = originalTxHash || cell.outPoint.txHash;
+        // The campaign cell moves on every pledge, so its own block is the latest pledge's.
+        // "Created at" is the creation tx's block, read from the same lookup.
+        let createdBlock = blockNumber;
         try {
           const txData = await this.client.getTransaction(lookupTxHash);
+          if (txData?.blockNumber !== undefined && txData?.blockNumber !== null) {
+            createdBlock = BigInt(txData.blockNumber);
+          }
           if (txData?.transaction) {
             for (const output of txData.transaction.outputs) {
               const script = ccc.Script.from(output.lock);
@@ -330,8 +381,11 @@ export class CampaignIndexer {
           status: data.status,
           title: data.title || null,
           description: data.description || null,
-          created_at: blockNumber.toString(),
+          created_at: createdBlock.toString(),
           original_tx_hash: originalTxHash || null,
+          category: data.category ?? null,
+          campaign_type_id: campaignTypeId,
+          creator_did: creatorDid,
         });
       } catch (error) {
         console.error("Error parsing campaign cell:", error);
@@ -442,6 +496,7 @@ export class CampaignIndexer {
             status: "live",
             block_number: blockNumber.toString(),
             created_at: blockNumber.toString(),
+            capacity: cell.cellOutput.capacity.toString(),
           });
         } catch (error) {
           console.error("Error parsing receipt cell:", error);
@@ -475,7 +530,8 @@ export class CampaignIndexer {
     pledgeCodeHash: string,
     intervalMs: number = 10000,
     receiptCodeHash?: string,
-    pledgeLockCodeHash?: string
+    pledgeLockCodeHash?: string,
+    runFirstCycleNow: boolean = false
   ) {
     this.campaignCodeHash = campaignCodeHash;
     this.pledgeCodeHash = pledgeCodeHash;
@@ -486,28 +542,42 @@ export class CampaignIndexer {
       clearInterval(this.pollingTimer);
     }
 
-    this.pollingTimer = setInterval(async () => {
+    const tick = async () => {
+      // A slow cycle (RPC latency, bot transactions) must not overlap the next one
+      if (this.pollInFlight) return;
+      this.pollInFlight = true;
       try {
-        // 1. Index all campaigns/pledges from CKB
-        await this.indexAll(
-          this.campaignCodeHash,
-          this.pledgeCodeHash,
-          this.receiptCodeHash || undefined,
-          this.pledgeLockCodeHash || undefined
-        );
-
-        // 2. (NEW) Run bot finalization checks
-        if (this.bot) {
-          await this.bot.processPendingFinalizations();
-          await this.bot.releaseSuccessfulPledges();
-          await this.bot.refundFailedPledges();
-        }
+        await this.runCycle();
       } catch (error) {
         console.error("Polling cycle error:", error);
+      } finally {
+        this.pollInFlight = false;
       }
-    }, intervalMs);
+    };
+
+    this.pollingTimer = setInterval(tick, intervalMs);
+    if (runFirstCycleNow) void tick();
 
     console.log(`Background indexing started (every ${intervalMs / 1000}s)`);
+  }
+
+  /**
+   * One poll cycle: index all campaigns/pledges from CKB, then run the bot if there is one.
+   * Uses the code hashes passed to startBackgroundIndexing.
+   */
+  async runCycle(): Promise<void> {
+    await this.indexAll(
+      this.campaignCodeHash,
+      this.pledgeCodeHash,
+      this.receiptCodeHash || undefined,
+      this.pledgeLockCodeHash || undefined
+    );
+
+    if (this.bot) {
+      await this.bot.processPendingFinalizations();
+      await this.bot.releaseSuccessfulPledges();
+      await this.bot.refundFailedPledges();
+    }
   }
 
   /**
@@ -546,6 +616,9 @@ export class CampaignIndexer {
       description: row.description || undefined,
       createdAt: BigInt(row.created_at),
       originalTxHash: row.original_tx_hash || undefined,
+      category: row.category ?? undefined,
+      campaignTypeId: row.campaign_type_id || undefined,
+      creatorDid: row.creator_did || undefined,
       creatorLockScript: row.creator_lock_code_hash
         ? {
             codeHash: row.creator_lock_code_hash,
@@ -623,6 +696,46 @@ export class CampaignIndexer {
   }
 
   /**
+   * Campaigns created by a lock hash
+   */
+  getCampaignsByCreator(lockHash: string): Campaign[] {
+    return this.db.getCampaignsByCreator(lockHash).map((row) => this.dbToCampaign(row));
+  }
+
+  /**
+   * Everything a backer has in each campaign they backed: every receipt they ever got
+   * (reclaimed ones included), the receipts still live, and the pledge cells still live.
+   * Grouped by pledge linkage hash, so it lines up with getPledgesForCampaign.
+   */
+  getBackerPositions(lockHash: string): BackerPosition[] {
+    const backer = lockHash.toLowerCase();
+    const positions = new Map<string, BackerPosition>();
+    const position = (linkage: string): BackerPosition => {
+      const key = linkage.toLowerCase();
+      let p = positions.get(key);
+      if (!p) {
+        p = { linkage: key, campaign: undefined, receipts: [], liveReceipts: [], livePledges: [] };
+        positions.set(key, p);
+      }
+      return p;
+    };
+
+    for (const r of this.receiptHistory.get(backer) ?? []) position(r.linkage).receipts.push(r);
+    for (const r of this.getReceiptsForBacker(backer)) {
+      // Receipt campaign_id is the linkage hash, sometimes with an "_0" suffix
+      position(r.campaignId.split("_")[0]).liveReceipts.push(r);
+    }
+    for (const p of this.getPledgesForBacker(backer)) position(p.campaignId).livePledges.push(p);
+
+    const byLinkage = new Map(
+      this.getCampaigns().map((c) => [this.getPledgeLinkageTxHash(c).toLowerCase(), c] as const)
+    );
+    for (const p of positions.values()) p.campaign = byLinkage.get(p.linkage);
+
+    return [...positions.values()].filter((p) => p.linkage !== "");
+  }
+
+  /**
    * Get campaign by ID
    */
   getCampaign(id: string): Campaign | undefined {
@@ -687,6 +800,7 @@ export class CampaignIndexer {
       pledgeAmount: BigInt(row.pledge_amount),
       status: row.status,
       createdAt: BigInt(row.created_at),
+      capacity: BigInt(row.capacity ?? "0"),
     };
   }
 
@@ -742,15 +856,27 @@ export class CampaignIndexer {
         const tx = (await this.client.getTransaction(entry.txHash))?.transaction;
         // Not marked as seen, so a failed lookup is retried on the next poll
         if (!tx) continue;
+        // Re-check after the await: another scan may have recorded this output meanwhile,
+        // and a second record would double the backer's contributed amount
+        if (this.seenReceiptOutputs.has(key)) continue;
+        this.seenReceiptOutputs.add(key);
 
         const receipt = parseReceiptData(tx.outputsData[Number(entry.cellIndex)]);
         const pledgeIndex = tx.outputs.findIndex((o) => o.type?.codeHash === pledgeCodeHash);
         if (pledgeIndex >= 0) {
           const linkage = parsePledgeData(tx.outputsData[pledgeIndex]).campaignId.toLowerCase();
+          const backer = receipt.backerLockHash.toLowerCase();
           if (!this.backerHistory.has(linkage)) this.backerHistory.set(linkage, new Set());
-          this.backerHistory.get(linkage)!.add(receipt.backerLockHash.toLowerCase());
+          this.backerHistory.get(linkage)!.add(backer);
+          if (!this.receiptHistory.has(backer)) this.receiptHistory.set(backer, []);
+          this.receiptHistory.get(backer)!.push({
+            receiptId: key,
+            linkage,
+            backerLockHash: backer,
+            pledgeAmount: receipt.pledgeAmount,
+            blockNumber: BigInt(entry.blockNumber),
+          });
         }
-        this.seenReceiptOutputs.add(key);
       }
     } catch (error) {
       // Keep whatever history was gathered; live cells still count in the meantime

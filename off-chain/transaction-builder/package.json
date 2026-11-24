@@ -8,11 +8,17 @@
     "dev": "ts-node src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["ckb", "nervos", "kickstarter", "transactions"],
+  "keywords": [
+    "ckb",
+    "nervos",
+    "kickstarter",
+    "transactions"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@ckb-ccc/core": "^1.12.2"
+    "@ckb-ccc/core": "^1.23.0",
+    "@ckb-ccc/did-ckb": "^0.2.15"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Campaign, IndexerPhase } from "@/lib/types";
 import { fetchCampaigns, fetchBlockNumber } from "@/lib/api";
 import { CampaignCard } from "@/components/CampaignCard";
@@ -9,10 +9,25 @@ import { SkeletonCard } from "@/components/Skeleton";
 import { useIndexerReady, IndexerStatusBadge, IndexerWaitNotice } from "@/components/IndexerStatus";
 import Link from "next/link";
 import { NETWORK } from "@/lib/constants";
+import { CAMPAIGN_CATEGORIES } from "@/lib/categories";
+import { Select } from "@/components/Select";
 
 const FILTER_TABS = ["All", "Active", "Funded", "Unsuccessful", "Ended"];
 
 const EMPTY_STATE = "text-center py-12 border border-dashed border-line rounded-[14px] text-ink-2";
+
+const CATEGORY_FILTER_OPTIONS = [
+  { value: "", label: "All categories" },
+  ...CAMPAIGN_CATEGORIES.map((c) => ({ value: c.slug, label: c.label })),
+];
+
+/** Wait this long after the last keystroke before searching */
+const SEARCH_DEBOUNCE_MS = 300;
+/** Same limit as the indexer's */
+const MAX_SEARCH_LENGTH = 100;
+
+const FIELD =
+  "px-3 py-2 border border-line rounded-lg bg-surface-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[40px]";
 
 /**
  * Filter campaigns by effective status
@@ -61,42 +76,74 @@ export default function CampaignsApp() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<string>("All");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const hasQuery = search.trim() !== "" || category !== "";
+  // Only the latest request may update the list, so a slow earlier search can't overwrite it
+  const requestId = useRef(0);
+  // After the first load, searches swap the results in place rather than flashing skeletons
+  const loadedOnce = useRef(false);
   const creatorNames = useCellNames(campaigns.map((c) => c.creatorLockScript));
   const { phase: indexerPhase, elapsedSeconds, retry: retryIndexer } = useIndexerReady();
   const indexerReady = indexerPhase === IndexerPhase.Ready;
 
   const load = useCallback(async (isRefresh = false) => {
+    const id = ++requestId.current;
     if (!isRefresh) setLoading(true);
-    setError(null);
 
     try {
-      const [campaignsData, blockNum] = await Promise.all([
-        fetchCampaigns(),
-        fetchBlockNumber(),
-      ]);
+      const campaignsData = await fetchCampaigns({ q: search, category: category || undefined });
+      if (id !== requestId.current) return;
 
       setCampaigns(campaignsData);
-      setCurrentBlock(blockNum);
+      setError(null);
+      loadedOnce.current = true;
     } catch (err) {
+      if (id !== requestId.current) return;
       setError(err instanceof Error ? err.message : "Failed to load campaigns");
     } finally {
-      if (!isRefresh) setLoading(false);
+      // Whichever request is latest clears the flag, even a refresh that superseded the first load
+      if (id === requestId.current) setLoading(false);
+    }
+  }, [search, category]);
+
+  // The tip doesn't depend on the search, so it loads on its own, not with every keystroke
+  const loadBlock = useCallback(async () => {
+    try {
+      setCurrentBlock(await fetchBlockNumber());
+    } catch {
+      // keep the last known tip
     }
   }, []);
+
+  // Debounce typing into the search box
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // Hold the first load until the indexer has woken up and synced,
   // otherwise an empty database reads as "no campaigns"
   useEffect(() => {
     if (!indexerReady) return;
-    load();
+    load(loadedOnce.current);
   }, [indexerReady, load]);
+
+  useEffect(() => {
+    if (!indexerReady) return;
+    loadBlock();
+  }, [indexerReady, loadBlock]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
     if (!indexerReady) return;
-    const interval = setInterval(() => load(true), 30000);
+    const interval = setInterval(() => {
+      load(true);
+      loadBlock();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [indexerReady, load]);
+  }, [indexerReady, load, loadBlock]);
 
   const showSkeletons = indexerReady ? loading : indexerPhase !== IndexerPhase.Offline;
   const showContent = indexerReady && !loading;
@@ -127,6 +174,27 @@ export default function CampaignsApp() {
 
           <IndexerWaitNotice phase={indexerPhase} elapsedSeconds={elapsedSeconds} onRetry={retryIndexer} />
 
+          {indexerReady && (
+            <div className="flex gap-2.5 flex-wrap mb-4">
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search title, description or id"
+                maxLength={MAX_SEARCH_LENGTH}
+                aria-label="Search campaigns"
+                className={`${FIELD} flex-1 min-w-[200px]`}
+              />
+              <Select
+                value={category}
+                onChange={setCategory}
+                options={CATEGORY_FILTER_OPTIONS}
+                ariaLabel="Category"
+                className="w-[190px]"
+              />
+            </div>
+          )}
+
           {showSkeletons && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
               {[1, 2, 3, 4].map((i) => (
@@ -141,7 +209,23 @@ export default function CampaignsApp() {
             </div>
           )}
 
-          {showContent && !error && campaigns.length === 0 && (
+          {showContent && !error && campaigns.length === 0 && hasQuery && (
+            <div className={EMPTY_STATE}>
+              <p className="mb-4">No campaigns match this search.</p>
+              <button
+                onClick={() => {
+                  setSearchInput("");
+                  setSearch("");
+                  setCategory("");
+                }}
+                className="inline-flex items-center px-4 py-2.5 rounded-lg font-semibold text-sm border border-line hover:bg-surface-3"
+              >
+                Clear search
+              </button>
+            </div>
+          )}
+
+          {showContent && !error && campaigns.length === 0 && !hasQuery && (
             <div className={EMPTY_STATE}>
               <p className="mb-4">No campaigns yet. Be the first to create one.</p>
               <Link

@@ -9,7 +9,9 @@ import {
   getEffectiveStatusColor,
   getFundingProgress,
   blocksToTimeEstimate,
+  canonicalCampaignId,
 } from "@/lib/utils";
+import { categoryLabel } from "@/lib/categories";
 import { CellMeter, CellMeterTone } from "./CellMeter";
 import { LockName } from "./CellName";
 
@@ -22,13 +24,8 @@ interface CampaignCardProps {
 
 const NO_NAMES = new Map<string, string | null>();
 
-/** The campaign's stable URL id: its creation out point, which never moves. */
-function canonicalCampaignId(campaign: Campaign): string {
-  return campaign.originalTxHash ? `${campaign.originalTxHash}_0` : campaign.campaignId;
-}
-
 /** Meter colour per effective status: amber while open, the outcome's colour once decided */
-function meterTone(effectiveStatus: string): CellMeterTone {
+export function meterTone(effectiveStatus: string): CellMeterTone {
   if (effectiveStatus === "success") return "ok";
   if (effectiveStatus === "failed") return "bad";
   return "fund";
@@ -52,6 +49,8 @@ export function CampaignCard({ campaign, currentBlock, names = NO_NAMES }: Campa
     ? BigInt(campaign.deadlineBlock) - currentBlock
     : null;
 
+  const category = categoryLabel(campaign.category);
+
   return (
     // Link by the creation out point, not the current one: since v1.2 the campaign cell
     // moves with every pledge, so a card rendered a moment ago would otherwise link to a
@@ -72,6 +71,10 @@ export function CampaignCard({ campaign, currentBlock, names = NO_NAMES }: Campa
           {getEffectiveStatusLabel(effectiveStatus)}
         </span>
       </div>
+
+      {category && (
+        <p className="font-mono text-[10px] tracking-wider uppercase text-ink-3 -mt-1.5">{category}</p>
+      )}
 
       {campaign.description && (
         <p className="text-[13px] text-ink-2 line-clamp-2">{campaign.description}</p>

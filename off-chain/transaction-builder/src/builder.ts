@@ -1,6 +1,6 @@
 import { ccc } from "@ckb-ccc/core";
 import { CampaignStatus, CampaignParams, PledgeParams, ContractInfo, TxResult, FinalizeCampaignParams, RefundPledgeParams, ReleasePledgeParams, DestroyCampaignParams, CreatePledgeWithReceiptParams, PermissionlessReleaseParams, PermissionlessRefundParams, MergeContributionsParams, ReclaimReceiptParams } from "./types";
-import { serializeCampaignData, serializePledgeData, serializeCampaignDataWithStatus, calculateCellCapacity, getMetadataSize, serializeReceiptData, serializePledgeLockArgs, encodeDeadlineBlockAsLockArgs, serializeCampaignTypeArgs, readTotalPledged, withTotalPledged, withCampaignStatus, readFundingGoal, readPledgeAmount } from "./serializer";
+import { serializeCampaignData, serializePledgeData, calculateCellCapacity, serializeReceiptData, serializePledgeLockArgs, encodeDeadlineBlockAsLockArgs, serializeCampaignTypeArgs, serializeReceiptTypeArgs, readTotalPledged, withTotalPledged, withCampaignStatus, readFundingGoal, readPledgeAmount } from "./serializer";
 import { createCkbClient, NetworkType } from "./ckbClient";
 
 /** Byte length of the v1.2 campaign type script args: TypeID (32) + pledge-lock code hash (32) */
@@ -73,9 +73,8 @@ export class TransactionBuilder {
     const campaignData = serializeCampaignData(params);
     console.log(`Campaign data: ${campaignData}`);
 
-    // Calculate required capacity (65 bytes header + metadata)
-    const metadataSize = (params.title || params.description) ? getMetadataSize(params.title, params.description) : 0;
-    const dataSize = 65 + metadataSize;
+    // Capacity from the bytes actually written (65-byte header + metadata), so the two can't drift
+    const dataSize = (campaignData.length - 2) / 2;
     // v1.2: campaign type args are 64 bytes (TypeID + pledge-lock code hash), not 32
     const capacity = calculateCellCapacity(dataSize, true, 65, CAMPAIGN_TYPE_ARGS_SIZE);
     console.log(`Required capacity: ${capacity} shannons (${Number(capacity) / 100000000} CKB)`);
@@ -631,7 +630,7 @@ export class TransactionBuilder {
     const pledgeTotalCapacity = pledgeBaseCapacity + params.amount;
 
     const receiptDataSize = 80;
-    const receiptCapacity = calculateCellCapacity(receiptDataSize, true, 65);
+    const receiptCapacity = calculateCellCapacity(receiptDataSize, true, 65, 64);
 
     // Get backer's lock script (backer owns the receipt cell)
     const backerAddress = await signer.getRecommendedAddress();
@@ -642,9 +641,9 @@ export class TransactionBuilder {
 
     // Build the transaction with cross-referencing args
     // Pledge type script args = receipt type script hash (32 bytes)
-    // Receipt type script args = pledge type script hash (32 bytes)
+    // Receipt type script args = pledge code hash + pledge-lock code hash (64 bytes)
     const pledgeTypeScriptArgs = ccc.hexFrom(this.receiptContract.codeHash.slice(2)); // Remove 0x prefix
-    const receiptTypeScriptArgs = ccc.hexFrom(this.pledgeContract.codeHash.slice(2)); // Remove 0x prefix
+    const receiptTypeScriptArgs = serializeReceiptTypeArgs(this.pledgeContract.codeHash, this.pledgeLockContract.codeHash)
 
     const tx = ccc.Transaction.from({
       inputs: [

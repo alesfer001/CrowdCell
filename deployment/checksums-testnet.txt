@@ -1,0 +1,8 @@
+# blake2b-256 (CKB personalization "ckb-default-hash") of each stripped contract binary
+# built by ./scripts/build-contracts.sh at this commit. These equal the data2 code hashes
+# deployed on testnet 2026-10-31 (deployment/deployed-contracts-testnet.json).
+0xd50ca43249515bb0ebe8534f4d7f74520e4fb7c1163d488c288672ffd7e7a8f5  contracts/campaign/target/riscv64imac-unknown-none-elf/release/campaign-contract
+0xd975780a890b817303a5414167ce235c041a9e63bb5e85f764acc71209fd02a3  contracts/campaign-lock/target/riscv64imac-unknown-none-elf/release/campaign-lock
+0xe45d09f08d0e842340afb004cfb6b6b6414ad387f9cd2f3e0b9abcd6ae8eb024  contracts/pledge/target/riscv64imac-unknown-none-elf/release/pledge
+0xc28d8042a1cf39d02db0cbc769a26faad80b39563c2d2de40536ddb66ae3a525  contracts/pledge-lock/target/riscv64imac-unknown-none-elf/release/pledge-lock
+0x523716e6c46501480391965a9305d2be33045ce3be19300f62546ff3aa8bf8b5  contracts/receipt/target/riscv64imac-unknown-none-elf/release/receipt
