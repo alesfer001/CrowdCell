@@ -3,13 +3,7 @@
 import { useEffect, useState } from "react";
 import { ccc } from "@ckb-ccc/connector-react";
 import { useDevnet } from "./DevnetContext";
-import type { CreatorLockScript } from "@/lib/types";
-
-interface WalletLockState {
-  lockHash: string | null;
-  lockScript: CreatorLockScript | null;
-  failed: boolean;
-}
+import type { WalletLockState } from "@/lib/types";
 
 /**
  * Lock hash and lock script of a signer's recommended address, and whether reading it failed (an

@@ -7,6 +7,16 @@ export interface CreatorLockScript {
   args: string;
 }
 
+/**
+ * The connected wallet's lock (useWalletLockHashState): both null while there is no signer or
+ * when reading the address failed.
+ */
+export interface WalletLockState {
+  lockHash: string | null;
+  lockScript: CreatorLockScript | null;
+  failed: boolean;
+}
+
 export interface Campaign {
   /**
    * The campaign's creation tx hash. Stable for the life of the campaign, unlike

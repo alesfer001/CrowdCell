@@ -103,7 +103,13 @@ async function main() {
   }
 
   // Create and start API server
-  const api = new IndexerAPI(indexer, new CellNameResolver(network));
+  // Known creator and backer locks, rebuilt at most once a minute for the `.cell` name lookup
+  let knownLocks = { at: 0, hashes: new Set<string>() };
+  const getKnownLocks = () => {
+    if (Date.now() - knownLocks.at > 60_000) knownLocks = { at: Date.now(), hashes: indexer.getKnownLockHashes() };
+    return knownLocks.hashes;
+  };
+  const api = new IndexerAPI(indexer, new CellNameResolver(network, getKnownLocks));
   api.start(PORT);
 
   // Initial indexing

@@ -46,6 +46,7 @@ export class IndexerAPI {
     this.app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
       if (res.headersSent) return next(err);
       const status = typeof err?.status === "number" && err.status >= 400 && err.status < 500 ? err.status : 500;
+      if (status === 500) console.error("Unhandled API error:", err);
       res.status(status).json({ error: status === 500 ? "Internal error" : "Invalid request body" });
     });
   }

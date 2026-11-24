@@ -10,6 +10,10 @@ import type { CreatorLockScript } from "./types";
 
 /** The indexer answers at most 200 locks per request. */
 const BATCH = 200;
+/** The indexer skips locks with more than 128 bytes of args; don't send them. */
+const MAX_ARGS_HEX = 2 + 128 * 2;
+/** How long an answer is reused before asking again, the same window the indexer caches for. */
+const TTL_MS = 10 * 60 * 1000;
 
 /**
  * A name as the registry allows it: a label of 1 to 40 characters of `a-z`, `0-9` and `-`, no hyphen at either end
@@ -19,13 +23,13 @@ const PART = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
 const CELL_NAME = new RegExp(`^(?=.{1,40}\\.cell$)${PART}(?:\\.${PART})?\\.cell$`);
 export const isCellName = (name: string) => CELL_NAME.test(name);
 
-/** Lock hash to name, or null for none. Module-wide, so moving between pages asks for each lock once. */
-const cache = new Map<string, string | null>();
+/** Lock hash to name (null for none) and when it was fetched. Module-wide, so moving between pages doesn't ask again. */
+const cache = new Map<string, { name: string | null; at: number }>();
 
 export type Lock = CreatorLockScript | null | undefined;
 
 function toEntry(lock: Lock): { hash: string; lock: { codeHash: string; hashType: string; args: string } } | null {
-  if (!lock?.codeHash) return null;
+  if (!lock?.codeHash || lock.args.length > MAX_ARGS_HEX) return null;
   try {
     const script = ccc.Script.from({ codeHash: lock.codeHash, hashType: lock.hashType as ccc.HashTypeLike, args: lock.args });
     return { hash: script.hash().toLowerCase(), lock: { codeHash: script.codeHash, hashType: script.hashType, args: script.args } };
@@ -44,7 +48,11 @@ export async function lookupCellNames(locks: Lock[]): Promise<Map<string, string
 
   const entries = locks.map(toEntry).filter((e) => e !== null);
   const pending = new Map<string, { codeHash: string; hashType: string; args: string }>(); // lock hash -> script
-  for (const e of entries) if (!cache.has(e.hash)) pending.set(e.hash, e.lock);
+  const now = Date.now();
+  for (const e of entries) {
+    const hit = cache.get(e.hash);
+    if (!hit || now - hit.at > TTL_MS) pending.set(e.hash, e.lock);
+  }
 
   const scripts = [...pending.values()];
   for (let i = 0; i < scripts.length; i += BATCH) {
@@ -57,13 +65,16 @@ export async function lookupCellNames(locks: Lock[]): Promise<Map<string, string
       if (!res.ok) continue;
       const { names: found } = (await res.json()) as { names: Record<string, string | null> };
       for (const [hash, name] of Object.entries(found ?? {})) {
-        if (pending.has(hash)) cache.set(hash, typeof name === "string" && isCellName(name) ? name : null);
+        if (pending.has(hash)) cache.set(hash, { name: typeof name === "string" && isCellName(name) ? name : null, at: now });
       }
     } catch {
       // Indexer unreachable: these locks keep their hashes.
     }
   }
 
-  for (const e of entries) if (cache.has(e.hash)) names.set(e.hash, cache.get(e.hash)!);
+  for (const e of entries) {
+    const hit = cache.get(e.hash);
+    if (hit) names.set(e.hash, hit.name);
+  }
   return names;
 }
