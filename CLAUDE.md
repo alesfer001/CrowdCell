@@ -16,7 +16,7 @@
 
 - `contracts/` — on-chain scripts (Rust, ckb-std 1.0), built by `scripts/build-contracts.sh`
 - `off-chain/transaction-builder/` — CCC transaction builder, deploy script and devnet test scripts
-- `off-chain/indexer/` — Express + SQLite indexer with a REST API and the settlement keeper (`src/bot.ts`)
+- `off-chain/indexer/` — Express + SQLite indexer with a REST API, the settlement keeper (`src/bot.ts`) and the Vellum claim issuer (`src/claims/`)
 - `off-chain/frontend/` — Next.js 16 / React 19 / Tailwind 4 app with CCC wallet connector
 - `deployment/deployed-contracts-{devnet,testnet}.json` — code hashes and tx hashes of the current deployments
 - `e2e/` — browser test scenarios
@@ -34,11 +34,13 @@
 
 ### Data layouts (little-endian)
 
-- **Campaign cell data** (65 bytes + optional metadata): `creator_lock_hash [32]`, `funding_goal u64`, `deadline_block u64`, `total_pledged u64`, `status u8` (0 Active, 1 Success, 2 Failed), `reserved [8]`. Title and description follow as length-prefixed strings.
+- **Campaign cell data** (65 bytes + optional metadata): `creator_lock_hash [32]`, `funding_goal u64`, `deadline_block u64`, `total_pledged u64`, `status u8` (0 Active, 1 Success, 2 Failed), `reserved [8]`. Metadata: title and description as `u16` length-prefixed strings, then a category byte (`off-chain/indexer/src/categories.ts`), then an optional creator `did:ckb` extension (prefix `44494401`).
 - **Campaign type args** (64 bytes): TypeID `[32]`, then the pledge-lock code hash `[32]`.
 - **Campaign-lock args** (8 bytes): `deadline_block u64`.
 - **Pledge cell data** (72 bytes): `campaign_id [32]`, `backer_lock_hash [32]`, `amount u64`.
 - **Pledge-lock args** (72 bytes): `campaign_type_script_hash [32]`, `deadline_block u64`, `backer_lock_hash [32]`.
+- **Pledge type args** (32 bytes): the receipt contract's code hash.
+- **Receipt type args** (64 bytes): pledge code hash `[32]`, pledge-lock code hash `[32]`.
 - **Receipt cell data** (80 bytes): `pledge_amount u64`, `backer_lock_hash [32]`, `campaign_type_script_hash [32]`, `deadline_block u64`.
 
 Minimum pledge is 100 CKB. The grace period (~180 days, 1,944,000 blocks at 8s/block) opens the refund fallback without a campaign cell_dep.
@@ -47,14 +49,16 @@ Minimum pledge is 100 CKB. The grace period (~180 days, 1,944,000 blocks at 8s/b
 
 - **Contracts**: `scripts/build-contracts.sh` (reproducible builds; contract `Cargo.lock` files are tracked so deployed code hashes reproduce)
 - **Deploy**: `CKB_NETWORK=testnet npx ts-node deploy-contracts.ts` from `off-chain/transaction-builder/` (devnet is the default)
-- **Indexer**: `npm run dev` (ts-node) or `npm run build && npm start` in `off-chain/indexer/`
+- **Indexer**: `npm run dev` (ts-node) or `npm run build && npm start` in `off-chain/indexer/`; `npm test` runs the unit tests
+- **Keeper only**: `npm run keeper` in `off-chain/indexer/` runs the settlement bot with its own chain index and no API (setup in `off-chain/indexer/KEEPER.md`)
 - **Frontend**: `npm run dev` in `off-chain/frontend/`
 - **Devnet tests**: the `test-*.ts` scripts in `off-chain/transaction-builder/` (e.g. `test-v1.2-exploits.ts`) run against an OffCKB devnet. They use OffCKB's publicly known devnet accounts.
 
 ## Configuration
 
 - **Frontend** (`off-chain/frontend/.env.example`): `NEXT_PUBLIC_NETWORK` (devnet/testnet/mainnet), `NEXT_PUBLIC_API_URL`, optional `NEXT_PUBLIC_CKB_RPC_URL`, and `NEXT_PUBLIC_*_CODE_HASH` / `_TX_HASH` per contract
-- **Indexer** (`off-chain/indexer/.env.example`): `CKB_RPC_URL` (default `http://127.0.0.1:8114`), `PORT` (3001), `DB_PATH` (`./data/indexer.db`), `POLL_INTERVAL` (10000 ms), contract code hashes
+- **Indexer** (`off-chain/indexer/.env.example`): `CKB_RPC_URL` (default `http://127.0.0.1:8114`), `PORT` (3001), `DB_PATH` (`./data/indexer.db`), `POLL_INTERVAL` (10000 ms), `CKB_NETWORK`, `BOT_PRIVATE_KEY` (keeper), contract code hashes. Contract hashes default to `deployment/deployed-contracts-<network>.json`; env vars override them.
+- **Vellum claims** (indexer, optional, testnet only): `CROWDCELL_VELLUM_ISSUER_DID` and `CROWDCELL_VELLUM_ISSUER_CKB_PRIVATE_KEY` turn on funded-campaign claims. The key must control the issuer DID and differ from `BOT_PRIVATE_KEY`; with neither set, issuance is off.
 - Client-exposed variables use the `NEXT_PUBLIC_` prefix
 - Current code hashes are in `deployment/deployed-contracts-testnet.json`; don't copy them into docs, they change on every redeploy
 
@@ -62,7 +66,9 @@ Minimum pledge is 100 CKB. The grace period (~180 days, 1,944,000 blocks at 8s/b
 
 - **Write path**: frontend builds the transaction with CCC, the wallet signs, the node accepts it. Every pledge consumes and re-creates the campaign cell, so concurrent pledges race; the frontend retries on a spent-input error (`isInputAlreadySpentError` in `off-chain/frontend/src/app/campaigns/[id]/page.tsx`).
 - **Read path**: the indexer polls the CKB RPC, parses cells (`parser.ts`) into SQLite (`database.ts`) and serves them over REST (`api.ts`); the frontend reads through `src/lib/api.ts`.
-- **Keeper**: `off-chain/indexer/src/bot.ts` finalizes expired campaigns and releases or refunds pledges every polling cycle. Anyone can run one; settlement doesn't depend on it.
+- **Keeper**: `off-chain/indexer/src/bot.ts` finalizes expired campaigns and releases or refunds pledges every polling cycle. Anyone can run one; settlement doesn't depend on it. It runs inside the indexer or on its own (`src/keeper.ts`).
+- **Dashboards**: `GET /wallet/:lockHash/campaigns` and `/wallet/:lockHash/pledges` (`src/wallet.ts`) give each campaign's or pledge's state and next action for My campaigns / My pledges; `GET /campaigns?q=&category=` filters the list (`src/search.ts`).
+- **Vellum identity**: a creator can attach a `did:ckb` at creation; the campaign page links the Vellum profile (`off-chain/frontend/src/lib/vellum.ts`). After a funded campaign pays out, the indexer issues a `crowdcell.campaign-funded.v1` claim from the CrowdCell issuer DID (`src/claims/`).
 - **Effective status**: an Active campaign past its deadline shows off-chain as `expired_success` or `expired_failed` (by `total_pledged` vs. goal) until a finalize transaction lands; `success` and `failed` come from the chain.
 
 ## TypeScript Conventions
