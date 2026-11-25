@@ -44,3 +44,6 @@ off-chain/indexer/data/
 .DS_Store
 Thumbs.db
 off-chain/transaction-builder/src/*.js
+
+# /brag-slim video output
+brag-output*/
